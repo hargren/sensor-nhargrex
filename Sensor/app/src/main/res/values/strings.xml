@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">Sensor</string>
+    <string name="version">Version: %s</string>
+    <string name="user">User: %s</string>
+    <string name="state">State: %s</string>
+    <string name="email">Email: %s</string>
+    <string name="title">Title</string>
+    <string name="sign_in">Google Sign In</string>
+    <string name="sign_out">Google Sign Out</string>
+    <string name="signed_out">Signed Out</string>
+    <string name="signed_in">Signed In</string>
+    <string name="error">Error</string>
+    <string name="unknown_msg">Unknown</string>
+    <string name="description">This is the description…</string>
+    <string name="msg_token_fmt" translatable="false">FCM registration Token: %s</string>
+    <string name="default_web_client_id">720939855604-ulfglm1gp1lvffft4secmai48b4m0lrq.apps.googleusercontent.com</string>
+</resources>

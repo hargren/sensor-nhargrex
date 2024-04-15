@@ -28,6 +28,17 @@ render.experimental.xml
 
 # Google Services (e.g. APIs or Firebase)
 google-services.json
+sensors-nhargrex-firebase-adminsdk-uev2w-11471882b8.json
 
 # Android Profiling
 *.hprof
+
+# Rust
+bin/
+target/
+
+# Python
+Sensor-Cloud/functions/
+__pycache__/
+*.tar.gz
+
