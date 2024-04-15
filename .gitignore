@@ -41,4 +41,3 @@ target/
 Sensor-Cloud/functions/
 __pycache__/
 *.tar.gz
-
