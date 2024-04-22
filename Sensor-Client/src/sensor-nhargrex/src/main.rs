@@ -3,7 +3,7 @@
 // (c) 2024 Nicholas Hargreaves
 //
 // Requires:
-// export GOOGLE_APPLICATION_CREDENTIALS="/opt/security/sensors-nhargrex-firebase-adminsdk-uev2w-11471882b8.json"
+// export GOOGLE_APPLICATION_CREDENTIALS="/opt/.security/sensors-nhargrex-firebase-adminsdk-uev2w-11471882b8.json"
 // export GOOGLE_USER_ID="2U0LR6A8LER430Tq4tmdfAdl4iu2"
 //
 //use pyo3::prelude::*;
@@ -30,19 +30,21 @@ fn main() -> Result<(),  Box<dyn std::error::Error>> {
 
     let _user : String = get_user_from_env();
 
+    let gpio_pin : u8 = 17;
+
     let interval = Duration::from_secs(1); // Set your desired delay (e.g., 1 second)
 
     // if user == *USER_ID_ERROR { return Err(PyValueError::new_err("Couldn't get GOOGLE_USER_ID")) };
 
     let gpio = Gpio::new()?;
 
-    let pin = gpio.get(23)?.into_input();
+    let pin = gpio.get(gpio_pin)?.into_input();
 
     loop {
-    // Read the logic level
-    let level = pin.read();
-        println!("Logic level: {:?}", level);
-        thread::sleep(interval);
+        // Read the logic level
+        let level = pin.read();
+            println!("Logic level: {:?}", level);
+            thread::sleep(interval);
     }
 
     // start loop to monitor state here...

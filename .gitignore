@@ -41,6 +41,7 @@ target/
 Sensor-Cloud/functions/
 __pycache__/
 *.tar.gz
+nhargrex.egg-info/
 
 # raspberrypi
 nhargre1@raspberrypi/

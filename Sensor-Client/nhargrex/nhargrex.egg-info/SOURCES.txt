@@ -1,4 +1,5 @@
 LICENSE
+README.md
 setup.py
 nhargrex.egg-info/PKG-INFO
 nhargrex.egg-info/SOURCES.txt
