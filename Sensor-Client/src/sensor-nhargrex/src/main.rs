@@ -10,10 +10,12 @@
 //use pyo3::exceptions::PyValueError;
 use std::env;
 use lazy_static::lazy_static;
-//use rppal::gpio::{Gpio, Pin, Trigger};
-use rppal::gpio::{Gpio};
-use std::{thread, time::Duration};
+use rppal::gpio::{Gpio, Trigger};
+//use std::{thread, time::Duration};
+use chrono::prelude::*;
+use std::io;
 
+#[derive(Debug)]
 pub enum State {
     Open,
     Closed
@@ -23,29 +25,43 @@ lazy_static! {
     static ref USER_ID_ERROR: String = String::from("Couldn't get GOOGLE_USER_ID");
 }
 
+const GPIO_PIN : u8 = 17;
+
 //fn main() -> Result<(), PyErr> {
 fn main() -> Result<(),  Box<dyn std::error::Error>> {
 
     let _state : State = State::Open;
 
-    let _user : String = get_user_from_env();
+    let user : String = get_user_from_env();
 
-    let gpio_pin : u8 = 17;
+    //let interval = Duration::from_secs(1); // Set your desired delay (e.g., 1 second)
 
-    let interval = Duration::from_secs(1); // Set your desired delay (e.g., 1 second)
-
-    // if user == *USER_ID_ERROR { return Err(PyValueError::new_err("Couldn't get GOOGLE_USER_ID")) };
+    //if user == *USER_ID_ERROR { return Err(PyValueError::new_err("Couldn't get GOOGLE_USER_ID")) };
+    if user == *USER_ID_ERROR { return Err("Couldn't get GOOGLE_USER_ID")? };
 
     let gpio = Gpio::new()?;
 
-    let pin = gpio.get(gpio_pin)?.into_input();
+    let mut sensor_door_pin = gpio.get(GPIO_PIN)?.into_input();
 
-    loop {
-        // Read the logic level
-        let level = pin.read();
-            println!("Logic level: {:?}", level);
-            thread::sleep(interval);
-    }
+    sensor_door_pin.set_reset_on_drop(true);
+
+    // create interrupt on gpio pin change
+    sensor_door_pin.set_async_interrupt(Trigger::Both, |level| {
+        let door_status : State = if level == rppal::gpio::Level::High {
+            State::Open
+        } else {
+            State::Closed
+        };
+        println!("Door {:?}: {:?} {}", door_status, level, Utc::now().timestamp());
+    })?;
+
+    println!("Monitoring pin {} (Press <enter> to exit):", GPIO_PIN.to_string());
+
+    let _ = io::stdin().read_line(&mut String::new());
+
+    sensor_door_pin.clear_async_interrupt()?;
+
+    Ok(())
 
     // start loop to monitor state here...
     // update_state_and_notify_user(user, state)
