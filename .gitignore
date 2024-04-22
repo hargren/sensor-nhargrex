@@ -41,3 +41,6 @@ target/
 Sensor-Cloud/functions/
 __pycache__/
 *.tar.gz
+
+# raspberrypi
+nhargre1@raspberrypi/

@@ -2,7 +2,7 @@
 # Windows:
 #   $env:GOOGLE_APPLICATION_CREDENTIALS="firebase-adminsdk.json"
 # Linux:
-#   export GOOGLE_APPLICATION_CREDENTIALS="/opt/security/sensors-nhargrex-firebase-adminsdk-uev2w-11471882b8.json"
+#   export GOOGLE_APPLICATION_CREDENTIALS="/opt/.security/sensors-nhargrex-firebase-adminsdk-uev2w-11471882b8.json"
 #   export GOOGLE_USER_ID="2U0LR6A8LER430Tq4tmdfAdl4iu2"
 #
 # Send notification entry point
