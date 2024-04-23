@@ -1,19 +1,22 @@
 //
-// sensor-nhargrex rust program
+// sensor-nhargrex Rust program
 // (c) 2024 Nicholas Hargreaves
 //
 // Requires:
 // export GOOGLE_APPLICATION_CREDENTIALS="/opt/.security/sensors-nhargrex-firebase-adminsdk-uev2w-11471882b8.json"
 // export GOOGLE_USER_ID="2U0LR6A8LER430Tq4tmdfAdl4iu2"
 //
-//use pyo3::prelude::*;
-//use pyo3::exceptions::PyValueError;
+// GND         --> 5
+// GPIO PIN 17 --> 6
+//
+use pyo3::prelude::*;
+use pyo3::exceptions::PyValueError;
 use std::env;
 use lazy_static::lazy_static;
 use rppal::gpio::{Gpio, Trigger};
-//use std::{thread, time::Duration};
+use std::{thread, time::Duration};
 use chrono::prelude::*;
-use std::io;
+use std::sync::Mutex;
 
 #[derive(Debug)]
 pub enum State {
@@ -27,47 +30,59 @@ lazy_static! {
 
 const GPIO_PIN : u8 = 17;
 
-//fn main() -> Result<(), PyErr> {
 fn main() -> Result<(),  Box<dyn std::error::Error>> {
 
-    let _state : State = State::Open;
+    let duration = Duration::from_secs(1);
 
-    let user : String = get_user_from_env();
+    let interrupt_mutex = Mutex::new(()); // Initialize the mutex
 
-    //let interval = Duration::from_secs(1); // Set your desired delay (e.g., 1 second)
-
-    //if user == *USER_ID_ERROR { return Err(PyValueError::new_err("Couldn't get GOOGLE_USER_ID")) };
+    // check user environment variable is set
+    let user = get_user_from_env();
     if user == *USER_ID_ERROR { return Err("Couldn't get GOOGLE_USER_ID")? };
 
-    let gpio = Gpio::new()?;
-
-    let mut sensor_door_pin = gpio.get(GPIO_PIN)?.into_input();
-
-    sensor_door_pin.set_reset_on_drop(true);
+    // get gpio pin as input
+    let mut sensor_door_pin = Gpio::new()?.get(GPIO_PIN)?.into_input();
 
     // create interrupt on gpio pin change
-    sensor_door_pin.set_async_interrupt(Trigger::Both, |level| {
-        let door_status : State = if level == rppal::gpio::Level::High {
+    sensor_door_pin.set_async_interrupt(Trigger::Both, move |level| {
+        
+        // get mutex
+        let _lock = interrupt_mutex.lock().unwrap();
+
+        let u : String = user.clone();
+
+        // get state
+        let state : State = if level == rppal::gpio::Level::High {
             State::Open
         } else {
             State::Closed
         };
-        println!("Door {:?}: {:?} {}", door_status, level, Utc::now().timestamp());
+
+        println!("Door State Change {:?}: {:?} {}", state, level, Utc::now().timestamp());
+
+        // update (cloud) state and notify (Android) user
+        if let Err(error) = update_state_and_notify_user(u, state) {
+            panic!("Error: {:?}", error);
+        }
     })?;
 
-    println!("Monitoring pin {} (Press <enter> to exit):", GPIO_PIN.to_string());
+    println!("Monitoring pin {} (Press <ctrl-c> to exit):", GPIO_PIN.to_string());
 
-    let _ = io::stdin().read_line(&mut String::new());
-
-    sensor_door_pin.clear_async_interrupt()?;
-
-    Ok(())
-
-    // start loop to monitor state here...
-    // update_state_and_notify_user(user, state)
+    loop {
+        thread::sleep(duration);
+        println!("Current State {:?}", get_state(&sensor_door_pin));
+    }
 }
 
-/*
+fn get_state(pin : &rppal::gpio::InputPin) -> State {
+    if pin.read() == rppal::gpio::Level::High {
+        State::Closed
+    }
+    else {
+        State::Open
+    }
+}
+
 fn update_state_and_notify_user(user: String, state: State) -> PyResult<()> {
 
     let s : String = match state {
@@ -90,7 +105,7 @@ fn update_state_and_notify_user(user: String, state: State) -> PyResult<()> {
         Ok(())
     })
 }
-*/
+
 fn get_user_from_env() -> String {
     match env::var("GOOGLE_USER_ID") {
         Ok(user_id) => {
