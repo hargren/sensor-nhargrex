@@ -76,10 +76,10 @@ fn main() -> Result<(),  Box<dyn std::error::Error>> {
 
 fn get_state(pin : &rppal::gpio::InputPin) -> State {
     if pin.read() == rppal::gpio::Level::High {
-        State::Closed
+        State::Open
     }
     else {
-        State::Open
+        State::Closed
     }
 }
 
