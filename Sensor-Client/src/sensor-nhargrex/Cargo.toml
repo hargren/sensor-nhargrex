@@ -7,7 +7,7 @@ edition = "2021"
 chrono = "0.4.38"
 lazy_static = "1.4.0"
 once_cell = "1.19.0"
-rppal = "0.17.1"
+rppal = { version = "0.17.1", features = ["hal-unproven"] }
 unflappable = "0.2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

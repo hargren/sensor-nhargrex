@@ -4,7 +4,7 @@
 //
 // Requires:
 // export GOOGLE_APPLICATION_CREDENTIALS="/opt/.security/sensors-nhargrex-firebase-adminsdk-uev2w-11471882b8.json"
-// export GOOGLE_USER_ID="2U0LR6A8LER430Tq4tmdfAdl4iu2"
+// export GOOGLE_USER_ID="2U0LR6A8LER430Tq4tmdfAdl4iu2" && cargo build && cargo run
 //
 // GND         --> 5
 // GPIO PIN 17 --> 6
@@ -16,7 +16,8 @@ use lazy_static::lazy_static;
 use rppal::gpio::{Gpio, Trigger};
 use std::{thread, time::Duration};
 use chrono::prelude::*;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
 pub enum State {
@@ -28,49 +29,71 @@ lazy_static! {
     static ref USER_ID_ERROR: String = String::from("Couldn't get GOOGLE_USER_ID");
 }
 
+// Constants
 const GPIO_PIN : u8 = 17;
+const SHOW_STATE : bool = false;
+const DEBOUNCE_TIME : Duration = Duration::from_millis(500);
+const POLLING_DURATION : Duration = Duration::from_millis(1000);
 
+// Main
 fn main() -> Result<(),  Box<dyn std::error::Error>> {
 
-    let duration = Duration::from_secs(1);
-
-    let interrupt_mutex = Mutex::new(()); // Initialize the mutex
+    // initialize atomic reference count mutex to now()
+    let interrupt_counter = Arc::new(Mutex::new(SystemTime::now().duration_since(UNIX_EPOCH)?));
 
     // check user environment variable is set
     let user = get_user_from_env();
     if user == *USER_ID_ERROR { return Err("Couldn't get GOOGLE_USER_ID")? };
 
     // get gpio pin as input
-    let mut sensor_door_pin = Gpio::new()?.get(GPIO_PIN)?.into_input();
+    let mut sensor_door_pin = Gpio::new()?.get(GPIO_PIN)?.into_input_pullup();
 
     // create interrupt on gpio pin change
     sensor_door_pin.set_async_interrupt(Trigger::Both, move |level| {
-        
-        // get mutex
-        let _lock = interrupt_mutex.lock().unwrap();
 
-        let u : String = user.clone();
+        // obtain Arc mutex
+        let mut last_interrupt_time = interrupt_counter.lock().unwrap();
 
-        // get state
-        let state : State = if level == rppal::gpio::Level::High {
-            State::Open
-        } else {
-            State::Closed
-        };
+        // get now() for releasing Arc Mutex
+        let time_of_interrupt = SystemTime::now().duration_since(UNIX_EPOCH).expect("REASON");
 
-        println!("Door State Change {:?}: {:?} {}", state, level, Utc::now().timestamp());
+        // calculate the time since last interrupt
+        let time_since_last_interrupt = time_of_interrupt.checked_sub(*last_interrupt_time).expect("REASON");
 
-        // update (cloud) state and notify (Android) user
-        if let Err(error) = update_state_and_notify_user(u, state) {
-            panic!("Error: {:?}", error);
+        // drop interrupt if time since last interrupt > debounce time (e.g. 500ms)                        
+        if time_since_last_interrupt > DEBOUNCE_TIME {
+            // process interrupt
+
+            // get state
+            let state : State = if level == rppal::gpio::Level::High {
+                State::Open
+            } else {
+                State::Closed
+            };
+
+            // print state
+            println!("Door State Change {:?} --> Distance={:?}", state, time_since_last_interrupt);
+
+            // clone user
+            let u : String = user.clone();
+
+            // update (cloud) state and notify (Android) user
+            if let Err(error) = update_state_and_notify_user(u, state) {
+                panic!("Error: {:?}", error);
+            }
         }
+
+        // Update Arc with now and release mutex by dropping out of local scope
+        *last_interrupt_time = time_of_interrupt;
     })?;
 
     println!("Monitoring pin {} (Press <ctrl-c> to exit):", GPIO_PIN.to_string());
 
     loop {
-        thread::sleep(duration);
-        println!("Current State {:?}", get_state(&sensor_door_pin));
+        thread::sleep(POLLING_DURATION);
+        if SHOW_STATE == true {
+            println!("{} State {:?}", Utc::now().timestamp(), get_state(&sensor_door_pin));
+        }
     }
 }
 
