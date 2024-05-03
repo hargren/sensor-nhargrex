@@ -3,12 +3,12 @@
 #   $env:GOOGLE_APPLICATION_CREDENTIALS="firebase-adminsdk.json"
 # Linux:
 #   export GOOGLE_APPLICATION_CREDENTIALS="/opt/.security/sensors-nhargrex-firebase-adminsdk-uev2w-11471882b8.json"
-#   export GOOGLE_USER_ID="2U0LR6A8LER430Tq4tmdfAdl4iu2"
+#   export GOOGLE_USER_ID="2U0..."
 #
 # Send notification entry point
 # -- update_state_and_notify_user(user, state)
 # -- >>> from sensors_nhargrex_firestore import update_state_and_notify_user
-# -- >>> update_state_and_notify_user('X2U0LR6A8LER430Tq4tmdfAdl4iu2', 'open')
+# -- >>> update_state_and_notify_user('2U0...', 'open')
 # -- returns 0 if Ok
 # -- returns 1 if Error
 """
@@ -27,7 +27,6 @@ BASE_URL = 'https://fcm.googleapis.com'
 FCM_ENDPOINT = 'v1/projects/' + PROJECT_ID + '/messages:send'
 FCM_URL = BASE_URL + '/' + FCM_ENDPOINT
 SCOPES = ['https://www.googleapis.com/auth/firebase.messaging']
-
 
 def _get_access_token(credentials_file):
 # [START retrieve_access_token]
@@ -93,7 +92,6 @@ def _firestore_read_state(user):
     raise Exception('Document does not exist.') 
     # [END read_data]
 
-
 def _validate_user(user):
   pattern = re.compile('[A-Za-z0-9]+')
   if (pattern.match(user) == None or len(user) != 28):
@@ -112,7 +110,7 @@ def _validate_state(state):
 # Send notification entry point
 # -- update_state_and_notify_user(user, state)
 # -- >>> from sensors_nhargrex_firestore import updateStateAndNotifyUser
-# -- >>> update_state_and_notify_user('2U0LR6A8LER430Tq4tmdfAdl4iu2', 'open')
+# -- >>> update_state_and_notify_user('2U0...', 'open')
 # -- returns 0 if Ok
 # -- returns 1 if Error
 def update_state_and_notify_user(user, state):
