@@ -6,6 +6,9 @@
 // export GOOGLE_APPLICATION_CREDENTIALS="/opt/.security/sensors-nhargrex-firebase-adminsdk-uev2w-11471882b8.json"
 // export GOOGLE_USER_ID="2U0LR6A8LER430Tq4tmdfAdl4iu2" && cargo build && cargo run
 //
+// To kill:
+// ps -eaf | grep sensor | grep nhargrex |  grep -Pio1 'nhargre1\s+\d+' | sed -r s/nhargre1// | xargs kill -9
+//
 // GND         --> 5
 // GPIO PIN 17 --> 6
 //
@@ -60,10 +63,8 @@ fn main() -> Result<(),  Box<dyn std::error::Error>> {
         // calculate the time since last interrupt
         let time_since_last_interrupt = time_of_interrupt.checked_sub(*last_interrupt_time).expect("REASON");
 
-        // drop interrupt if time since last interrupt > debounce time (e.g. 500ms)                        
+        // process interrupt if time since last interrupt > debounce time (e.g. 500ms)                        
         if time_since_last_interrupt > DEBOUNCE_TIME {
-            // process interrupt
-
             // get state
             let state : State = if level == rppal::gpio::Level::High {
                 State::Open
@@ -74,11 +75,8 @@ fn main() -> Result<(),  Box<dyn std::error::Error>> {
             // print state
             println!("Door State Change {:?} --> Distance={:?}", state, time_since_last_interrupt);
 
-            // clone user
-            let u : String = user.clone();
-
             // update (cloud) state and notify (Android) user
-            if let Err(error) = update_state_and_notify_user(u, state) {
+            if let Err(error) = update_state_and_notify_user(user.clone(), state) {
                 panic!("Error: {:?}", error);
             }
         }
@@ -119,7 +117,7 @@ fn update_state_and_notify_user(user: String, state: State) -> PyResult<()> {
         //  test_python_integration
         //  update_state_and_notify_user
         let result: i32 = firebase
-            .getattr("test_python_integration")?
+            .getattr("update_state_and_notify_user")?
             .call1((user, s,))?
             .extract()?;
 

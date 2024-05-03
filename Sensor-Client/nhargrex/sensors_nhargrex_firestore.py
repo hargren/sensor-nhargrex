@@ -61,11 +61,11 @@ def _build_message(token, state):
     }
   }
 
-def _firestore_add_data(state):
+def _firestore_add_data(state, user):
     db = firestore.client()
 
     # [START add_data]
-    doc_ref = db.collection("state").document("garage")
+    doc_ref = db.collection("sensors").document(user)
     doc_ref.set({
         "state": state,
     })
@@ -81,6 +81,18 @@ def _firestore_read_data(user):
         return doc.to_dict()
     raise Exception('Document does not exist.') 
     # [END read_data]
+
+def _firestore_read_state(user):
+    db = firestore.client()
+
+    # [START read_data]
+    doc_ref = db.collection('sensors').document(user)
+    doc = doc_ref.get()
+    if doc.exists:     
+        return doc.to_dict()
+    raise Exception('Document does not exist.') 
+    # [END read_data]
+
 
 def _validate_user(user):
   pattern = re.compile('[A-Za-z0-9]+')
@@ -108,8 +120,10 @@ def update_state_and_notify_user(user, state):
     _validate_user(user)
     _validate_state(state)
     app = firebase_admin.initialize_app()
-    _firestore_add_data(state)
-    _send_fcm_message(_build_message(_firestore_read_data(user)["token"], state))
+    state_in_cloud = _firestore_read_state(user)["state"]
+    if (state != state_in_cloud):
+      _firestore_add_data(state, user)
+      _send_fcm_message(_build_message(_firestore_read_data(user)["token"], state))   
     firebase_admin.delete_app(app)
   except ValueError as e:
     return 1
@@ -126,3 +140,4 @@ def test_python_integration(user, state):
   except RuntimeError as e:
     return 1
   return 0
+  
