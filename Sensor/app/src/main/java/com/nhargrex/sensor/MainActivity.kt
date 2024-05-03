@@ -68,14 +68,14 @@ class MainActivity : ComponentActivity() {
             updateSubscriber = subscribeToStateUpdates()
         }
 
-        val signIn = setSignInButtonText(auth.currentUser)
-        signIn.setOnClickListener { _: View? ->
+        //val signIn = setSignInButtonText(auth.currentUser)
+        setSignInButtonText(auth.currentUser).setOnClickListener { _: View? ->
             if (auth.currentUser != null) {
                 AuthUI.getInstance()
                     .signOut(this)
                     .addOnCompleteListener {
                         setSignInButtonText(auth.currentUser)
-                        setUserId("Signed Out")
+                        setUserId(getString(R.string.signed_out))
                         setEmail(getString(R.string.unknown_msg))
                         updateSubscriber.remove()
                         setState(getString(R.string.unknown_msg))
@@ -131,32 +131,39 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateState() {
-        val db = Firebase.firestore
-        val docRef = db.collection("state").document("garage")
-        docRef.get()
-            .addOnSuccessListener { document ->
-                setState(if (document != null) (document.data?.get("state") ?: "--").toString() else getString(R.string.error))
-            }
-            .addOnFailureListener {
-                setState(getString(R.string.error))
-            }
+
+        val currentUser = FirebaseAuth.getInstance().currentUser
+
+        currentUser?.let {
+            val userId = currentUser.uid;
+            Firebase.firestore
+                .collection("sensors")
+                .document(userId)
+                .get()
+                .addOnSuccessListener { document ->
+                    setState((document.data?.get("state") ?: "--").toString())
+                }
+        }
     }
 
     private fun subscribeToStateUpdates() : ListenerRegistration {
         val db = Firebase.firestore
-        val docRef = db.collection("state").document("garage")
+        val path = auth.currentUser?.uid
 
-        val unsubscribeToUpdates = docRef.addSnapshotListener {
-            querySnapshot, firebaseFirestoreException ->
-            firebaseFirestoreException?.let {
-                Toast.makeText(this, it.message, Toast.LENGTH_SHORT).show()
-                return@addSnapshotListener
+        val docRef = db.collection("sensors").document(path!!)
+
+        val unsubscribeToUpdates =
+            docRef.addSnapshotListener { querySnapshot, firebaseFirestoreException ->
+                firebaseFirestoreException?.let {
+                    Toast.makeText(this, it.message, Toast.LENGTH_SHORT).show()
+                    return@addSnapshotListener
+                }
+                querySnapshot?.let {
+                    setState((querySnapshot.data?.get("state") ?: "--").toString())
+                }
             }
-            querySnapshot?.let {
-                setState((querySnapshot.data?.get("state") ?: "--").toString())
-            }
-        }
         return unsubscribeToUpdates
+
     }
 
     private fun getIdToken(user: FirebaseUser?) {
