@@ -5,9 +5,16 @@ edition = "2021"
 
 [dependencies]
 chrono = "0.4.38"
+firestore = "0.41.0"
 lazy_static = "1.4.0"
+log = "0.4.21"
 once_cell = "1.19.0"
 rppal = { version = "0.17.1", features = ["hal-unproven"] }
+rustc-serialize = "0.3.25"
+serde = "1.0.201"
+simple-logging = "2.0.2"
+simple_logger = "5.0.0"
+tokio = {version = "1.37.0", features = ["rt", "rt-multi-thread", "macros"] }
 unflappable = "0.2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

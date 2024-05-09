@@ -4,7 +4,10 @@
 //
 // Requires:
 // export GOOGLE_APPLICATION_CREDENTIALS="/opt/.security/sensors-nhargrex-firebase-adminsdk-uev2w-11471882b8.json"
-// export GOOGLE_USER_ID="2U0LR6A8LER430Tq4tmdfAdl4iu2" && cargo build && cargo run
+// export GOOGLE_USER_ID="2U0LR6A8LER430Tq4tmdfAdl4iu2"
+// export GOOGLE_PROJECT_ID=sensors-nhargrex
+// cargo build && cargo run
+// cargo build --release
 //
 // To kill:
 // ps -eaf | grep sensor | grep nhargrex |  grep -Pio1 'nhargre1\s+\d+' | sed -r s/nhargre1// | xargs kill -9
@@ -18,14 +21,26 @@ use std::env;
 use lazy_static::lazy_static;
 use rppal::gpio::{Gpio, Trigger};
 use std::{thread, time::Duration};
-use chrono::prelude::*;
+use chrono::{TimeZone, Utc};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+use log::LevelFilter;
+use simple_logging::{log_to_file};
+use firestore::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub enum State {
     Open,
     Closed
+}
+
+// Sensor Request Firestore Document
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct SensorRefreshRequestObject {
+    #[serde(alias = "_firestore_id")]
+    doc_id: String,
+    r_ts: u64
 }
 
 lazy_static! {
@@ -37,9 +52,37 @@ const GPIO_PIN : u8 = 17;
 const SHOW_STATE : bool = false;
 const DEBOUNCE_TIME : Duration = Duration::from_millis(500);
 const POLLING_DURATION : Duration = Duration::from_millis(1000);
+const SENSORS_REFRESH_REQUEST_COLLECTION: &str = "sensorsRefreshRequest";
+const TEST_TARGET_ID_BY_DOC_IDS: FirestoreListenerTarget = FirestoreListenerTarget::new(17_u32);
 
 // Main
-fn main() -> Result<(),  Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    // statup log
+    log_to_file("/tmp/sensor-nhargrex.log", LevelFilter::Info).unwrap();
+    log::info!("Normal start");
+
+    // setup firestore
+    let db = FirestoreDb::with_options_service_account_key_file(
+        FirestoreDbOptions::new(config_env_var("GOOGLE_PROJECT_ID")?.to_string()),
+        config_env_var("GOOGLE_APPLICATION_CREDENTIALS")?.to_string().into()
+      ).await?;
+    log::info!("Firestore DB initialized");
+
+    let mut listener = db
+    .create_listener(
+        FirestoreTempFilesListenStateStorage::new(),
+    )
+    .await?;
+    log::info!("Firestore DB listener created");
+
+    // add target
+    db.fluent()
+    .select()
+    .from(SENSORS_REFRESH_REQUEST_COLLECTION)
+    .listen()
+    .add_target(TEST_TARGET_ID_BY_DOC_IDS, &mut listener)?;
 
     // initialize atomic reference count mutex to now()
     let interrupt_counter = Arc::new(Mutex::new(SystemTime::now().duration_since(UNIX_EPOCH)?));
@@ -47,6 +90,33 @@ fn main() -> Result<(),  Box<dyn std::error::Error>> {
     // check user environment variable is set
     let user = get_user_from_env();
     if user == *USER_ID_ERROR { return Err("Couldn't get GOOGLE_USER_ID")? };
+
+    // start listener thread
+    listener
+        .start(|event| async move {
+            log::info!("Firestore DB listener thread started");
+            match event {
+                FirestoreListenEvent::DocumentChange(ref doc_change) => {
+                    log::info!("Doc changed: {doc_change:?}");
+                    
+                    if let Some(doc) = &doc_change.document {
+                        let sensor_refresh_request: SensorRefreshRequestObject =
+                            FirestoreDb::deserialize_doc_to::<SensorRefreshRequestObject>(doc)
+                                .expect("Deserialized object");
+                        log::info!("Recevied: {sensor_refresh_request:?} r_ts={}", sensor_refresh_request.r_ts);
+                        let request_ts = Utc.timestamp_opt(sensor_refresh_request.r_ts as i64, 0).unwrap();
+                        let now_ts = Utc::now();
+                        let delta_ts = (request_ts - now_ts).num_seconds();
+                        log::info!("Time delta of refresh request: now={:?}, request={:?}, delta_s={}", now_ts, request_ts, delta_ts);
+                    }
+                }
+                _ => {
+                    log::info!("Received a listen response to handle!");
+                }
+            }
+            Ok(())
+        })
+        .await?;
 
     // get gpio pin as input
     let mut sensor_door_pin = Gpio::new()?.get(GPIO_PIN)?.into_input_pullup();
@@ -73,10 +143,11 @@ fn main() -> Result<(),  Box<dyn std::error::Error>> {
             };
 
             // print state
-            println!("Door State Change {:?} --> Distance={:?}", state, time_since_last_interrupt);
+            log::info!("Door State Change {:?} --> Distance={:?}", state, time_since_last_interrupt);
 
             // update (cloud) state and notify (Android) user
             if let Err(error) = update_state_and_notify_user(user.clone(), state) {
+                log::error!("Panic on update_state_and_notify_user {:?}", error);
                 panic!("Error: {:?}", error);
             }
         }
@@ -85,14 +156,18 @@ fn main() -> Result<(),  Box<dyn std::error::Error>> {
         *last_interrupt_time = time_of_interrupt;
     })?;
 
-    println!("Monitoring pin {} (Press <ctrl-c> to exit):", GPIO_PIN.to_string());
+    log::info!("Monitoring pin {} (Press <ctrl-c> to exit):", GPIO_PIN.to_string());
 
     loop {
         thread::sleep(POLLING_DURATION);
         if SHOW_STATE == true {
-            println!("{} State {:?}", Utc::now().timestamp(), get_state(&sensor_door_pin));
+            log::info!("{} State {:?}", Utc::now().timestamp(), get_state(&sensor_door_pin));
         }
     }
+}
+
+pub fn config_env_var(name: &str) -> Result<String, String> {
+    std::env::var(name).map_err(|e| format!("{}: {}", name, e))
 }
 
 fn get_state(pin : &rppal::gpio::InputPin) -> State {
