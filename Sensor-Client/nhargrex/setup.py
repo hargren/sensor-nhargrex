@@ -12,7 +12,7 @@ setup(
     description="Connection to FCM",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/nhagre1/my_package",
+    url="https://github.com/nhargre1/my_package",
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

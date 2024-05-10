@@ -8,6 +8,7 @@
 // export GOOGLE_PROJECT_ID=sensors-nhargrex
 // cargo build && cargo run
 // cargo build --release
+// sudo systemctl daemon-reload && sudo systemctl start sensor-nhargrex && sudo systemctl status sensor-nhargrex
 //
 // To kill:
 // ps -eaf | grep sensor | grep nhargrex |  grep -Pio1 'nhargre1\s+\d+' | sed -r s/nhargre1// | xargs kill -9
@@ -75,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut listener = db
     .create_listener(
-        FirestoreTempFilesListenStateStorage::new(),
+        FirestoreMemListenStateStorage::new(),
     )
     .await?;
     log::info!("Firestore DB listener created");
@@ -86,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .from(SENSORS_REFRESH_REQUEST_COLLECTION)
     .listen()
     .add_target(SENSORS_REFRESH_REQUEST_DOCUMENT_ID, &mut listener)?;
-
+    
     // initialize atomic reference count mutex to now()
     let interrupt_counter = Arc::new(Mutex::new(SystemTime::now().duration_since(UNIX_EPOCH)?));
 
@@ -132,7 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Update Arc with now and release mutex by dropping out of local scope
         *last_interrupt_time = time_of_interrupt;
     })?;
-
+    
     // start listener thread for document change (refresh request)
     let fs_listener = listener
         .start(|event| async move {
@@ -178,7 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(error) = update_state_and_notify_user(get_user_from_env(), get_state(&sensor_door_pin)) {
         log::error!("Panic on update_state_and_notify_user {:?}", error);
         panic!("Error: {:?}", error);
-    }    
+    }
 
     // main loop to keep everything ticking
     log::info!("Monitoring pin {} (Press <ctrl-c> to exit):", GPIO_PIN_17.to_string());
@@ -191,6 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn config_env_var(name: &str) -> Result<String, String> {
+    log::info!("Try to get environment variable from {}", name);   
     std::env::var(name).map_err(|e| format!("{}: {}", name, e))
 }
 
