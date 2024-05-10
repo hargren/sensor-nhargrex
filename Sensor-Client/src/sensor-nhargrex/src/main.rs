@@ -13,7 +13,8 @@
 // ps -eaf | grep sensor | grep nhargrex |  grep -Pio1 'nhargre1\s+\d+' | sed -r s/nhargre1// | xargs kill -9
 //
 // GND         --> 5
-// GPIO PIN 17 --> 6
+// GPIO PIN 17 --> 6 -- used for interrupt on thread 1
+// GPIO PIN 18 --> ? -- used for on document change on thread 2
 //
 use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
@@ -48,12 +49,14 @@ lazy_static! {
 }
 
 // Constants
-const GPIO_PIN : u8 = 17;
+const GPIO_PIN_17 : u8 = 17;
+const GPIO_PIN_18 : u8 = 18;
 const SHOW_STATE : bool = false;
 const DEBOUNCE_TIME : Duration = Duration::from_millis(500);
 const POLLING_DURATION : Duration = Duration::from_millis(5000);
 const SENSORS_REFRESH_REQUEST_COLLECTION: &str = "sensorsRefreshRequest";
 const SENSORS_REFRESH_REQUEST_DOCUMENT_ID: FirestoreListenerTarget = FirestoreListenerTarget::new(17_u32);
+const REFRESH_REQUEST_TIMEWINDOW : i64 = -30;
 
 // Main
 #[tokio::main]
@@ -62,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // statup log
     log_to_file("/tmp/sensor-nhargrex.log", LevelFilter::Info).unwrap();
     log::info!("Normal start");
-
+    
     // setup firestore
     let db = FirestoreDb::with_options_service_account_key_file(
         FirestoreDbOptions::new(config_env_var("GOOGLE_PROJECT_ID")?.to_string()),
@@ -92,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if user == *USER_ID_ERROR { return Err("Couldn't get GOOGLE_USER_ID")? };
 
     // get gpio pin as input
-    let mut sensor_door_pin = Gpio::new()?.get(GPIO_PIN)?.into_input_pullup();
+    let mut sensor_door_pin = Gpio::new()?.get(GPIO_PIN_17)?.into_input_pullup();
 
     // create interrupt on gpio pin change
     sensor_door_pin.set_async_interrupt(Trigger::Both, move |level| {
@@ -119,6 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Door State Change {:?} --> Distance={:?}", state, time_since_last_interrupt);
 
             // update (cloud) state and notify (Android) user
+            // will only notify if state is different to the one in the cloud
             if let Err(error) = update_state_and_notify_user(user.clone(), state) {
                 log::error!("Panic on update_state_and_notify_user {:?}", error);
                 panic!("Error: {:?}", error);
@@ -129,23 +133,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         *last_interrupt_time = time_of_interrupt;
     })?;
 
-    // start listener thread
+    // start listener thread for document change (refresh request)
     let fs_listener = listener
         .start(|event| async move {
             log::info!("Firestore DB listener thread started");
             match event {
                 FirestoreListenEvent::DocumentChange(ref doc_change) => {
-                    log::info!("Doc changed: {doc_change:?}");
-                    
                     if let Some(doc) = &doc_change.document {
-                        let sensor_refresh_request: SensorRefreshRequestObject =
-                            FirestoreDb::deserialize_doc_to::<SensorRefreshRequestObject>(doc)
-                                .expect("Deserialized object");
+                        let sensor_refresh_request: SensorRefreshRequestObject = FirestoreDb::deserialize_doc_to::<SensorRefreshRequestObject>(doc).expect("Deserialized object");
                         log::info!("Recevied: {sensor_refresh_request:?} r_ts={}", sensor_refresh_request.r_ts);
-                        let request_ts = Utc.timestamp_opt(sensor_refresh_request.r_ts as i64, 0).unwrap();
-                        let now_ts = Utc::now();
-                        let delta_ts = (request_ts - now_ts).num_seconds();
-                        log::info!("Time delta of refresh request: now={:?}, request={:?}, delta_s={}", now_ts, request_ts, delta_ts);
+                        let delta_ts = (Utc.timestamp_opt(sensor_refresh_request.r_ts as i64, 0).unwrap() - Utc::now())
+                                        .num_seconds();
+                        log::info!("Time delta of refresh request: delta={}s", delta_ts);
+                        if delta_ts < 0 && delta_ts > REFRESH_REQUEST_TIMEWINDOW {
+                            // get gpio pin as input and read state
+                            let state = get_state(&Gpio::new()?.get(GPIO_PIN_18)?.into_input_pullup());
+                            log::info!("{} Refresh state {:?}", Utc::now().timestamp(), state);
+
+                            // check user environment variable is set
+                            let user = get_user_from_env();
+                            if user == *USER_ID_ERROR { return Err("Couldn't get GOOGLE_USER_ID")? };
+
+                            // update (cloud) state and notify (Android) user
+                            // will only notify if state is different to the one in the cloud
+                            if let Err(error) = update_state_and_notify_user(user, state) {
+                                log::error!("Panic on update_state_and_notify_user {:?}", error);
+                                panic!("Error: {:?}", error);
+                            }
+                        }
                     }
                 }
                 _ => {
@@ -158,8 +173,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // listen for refresh requests
     fs_listener.await?;
 
+    // since we are starting up, and sensor state may have changed on device power-off
+    // make a one time update and notify
+    if let Err(error) = update_state_and_notify_user(get_user_from_env(), get_state(&sensor_door_pin)) {
+        log::error!("Panic on update_state_and_notify_user {:?}", error);
+        panic!("Error: {:?}", error);
+    }    
+
     // main loop to keep everything ticking
-    log::info!("Monitoring pin {} (Press <ctrl-c> to exit):", GPIO_PIN.to_string());
+    log::info!("Monitoring pin {} (Press <ctrl-c> to exit):", GPIO_PIN_17.to_string());
     loop {
         thread::sleep(POLLING_DURATION);
         if SHOW_STATE == true {
