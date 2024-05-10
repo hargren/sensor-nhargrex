@@ -51,9 +51,9 @@ lazy_static! {
 const GPIO_PIN : u8 = 17;
 const SHOW_STATE : bool = false;
 const DEBOUNCE_TIME : Duration = Duration::from_millis(500);
-const POLLING_DURATION : Duration = Duration::from_millis(1000);
+const POLLING_DURATION : Duration = Duration::from_millis(5000);
 const SENSORS_REFRESH_REQUEST_COLLECTION: &str = "sensorsRefreshRequest";
-const TEST_TARGET_ID_BY_DOC_IDS: FirestoreListenerTarget = FirestoreListenerTarget::new(17_u32);
+const SENSORS_REFRESH_REQUEST_DOCUMENT_ID: FirestoreListenerTarget = FirestoreListenerTarget::new(17_u32);
 
 // Main
 #[tokio::main]
@@ -82,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .select()
     .from(SENSORS_REFRESH_REQUEST_COLLECTION)
     .listen()
-    .add_target(TEST_TARGET_ID_BY_DOC_IDS, &mut listener)?;
+    .add_target(SENSORS_REFRESH_REQUEST_DOCUMENT_ID, &mut listener)?;
 
     // initialize atomic reference count mutex to now()
     let interrupt_counter = Arc::new(Mutex::new(SystemTime::now().duration_since(UNIX_EPOCH)?));
@@ -90,33 +90,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // check user environment variable is set
     let user = get_user_from_env();
     if user == *USER_ID_ERROR { return Err("Couldn't get GOOGLE_USER_ID")? };
-
-    // start listener thread
-    listener
-        .start(|event| async move {
-            log::info!("Firestore DB listener thread started");
-            match event {
-                FirestoreListenEvent::DocumentChange(ref doc_change) => {
-                    log::info!("Doc changed: {doc_change:?}");
-                    
-                    if let Some(doc) = &doc_change.document {
-                        let sensor_refresh_request: SensorRefreshRequestObject =
-                            FirestoreDb::deserialize_doc_to::<SensorRefreshRequestObject>(doc)
-                                .expect("Deserialized object");
-                        log::info!("Recevied: {sensor_refresh_request:?} r_ts={}", sensor_refresh_request.r_ts);
-                        let request_ts = Utc.timestamp_opt(sensor_refresh_request.r_ts as i64, 0).unwrap();
-                        let now_ts = Utc::now();
-                        let delta_ts = (request_ts - now_ts).num_seconds();
-                        log::info!("Time delta of refresh request: now={:?}, request={:?}, delta_s={}", now_ts, request_ts, delta_ts);
-                    }
-                }
-                _ => {
-                    log::info!("Received a listen response to handle!");
-                }
-            }
-            Ok(())
-        })
-        .await?;
 
     // get gpio pin as input
     let mut sensor_door_pin = Gpio::new()?.get(GPIO_PIN)?.into_input_pullup();
@@ -156,8 +129,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         *last_interrupt_time = time_of_interrupt;
     })?;
 
-    log::info!("Monitoring pin {} (Press <ctrl-c> to exit):", GPIO_PIN.to_string());
+    // start listener thread
+    let fs_listener = listener
+        .start(|event| async move {
+            log::info!("Firestore DB listener thread started");
+            match event {
+                FirestoreListenEvent::DocumentChange(ref doc_change) => {
+                    log::info!("Doc changed: {doc_change:?}");
+                    
+                    if let Some(doc) = &doc_change.document {
+                        let sensor_refresh_request: SensorRefreshRequestObject =
+                            FirestoreDb::deserialize_doc_to::<SensorRefreshRequestObject>(doc)
+                                .expect("Deserialized object");
+                        log::info!("Recevied: {sensor_refresh_request:?} r_ts={}", sensor_refresh_request.r_ts);
+                        let request_ts = Utc.timestamp_opt(sensor_refresh_request.r_ts as i64, 0).unwrap();
+                        let now_ts = Utc::now();
+                        let delta_ts = (request_ts - now_ts).num_seconds();
+                        log::info!("Time delta of refresh request: now={:?}, request={:?}, delta_s={}", now_ts, request_ts, delta_ts);
+                    }
+                }
+                _ => {
+                    log::info!("Received a listen response to handle!");
+                }
+            }
+            Ok(())
+        });
 
+    // listen for refresh requests
+    fs_listener.await?;
+
+    // main loop to keep everything ticking
+    log::info!("Monitoring pin {} (Press <ctrl-c> to exit):", GPIO_PIN.to_string());
     loop {
         thread::sleep(POLLING_DURATION);
         if SHOW_STATE == true {
