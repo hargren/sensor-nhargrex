@@ -67,6 +67,7 @@ def _firestore_add_data(state, user):
     doc_ref = db.collection("sensors").document(user)
     doc_ref.set({
         "state": state,
+        "online" : True
     })
     # [END add_data]
 

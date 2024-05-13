@@ -49,7 +49,7 @@ struct SensorRefreshRequestObject {
 // Sensor Request Firestore Document
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct SensorObject {
-    onine: bool,
+    online: bool,
     state: String
 }
 
@@ -64,8 +64,9 @@ const SHOW_STATE : bool = false;
 const DEBOUNCE_TIME : Duration = Duration::from_millis(500);
 const POLLING_DURATION : Duration = Duration::from_millis(5000);
 const SENSORS_REFRESH_REQUEST_COLLECTION: &str = "sensorsRefreshRequest";
+const SENSORS_COLLECTION: &str = "sensors";
 const SENSORS_REFRESH_REQUEST_DOCUMENT_ID: FirestoreListenerTarget = FirestoreListenerTarget::new(17_u32);
-const REFRESH_REQUEST_TIMEWINDOW_SECONDS : i64 = -5;
+const REFRESH_REQUEST_TIMEWINDOW_SECONDS : i64 = -15;
 
 // Main
 #[tokio::main]
@@ -149,7 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // start listener thread for document change (refresh request)
     let fs_listener = listener
         .start(|event| async move {
-            log::info!("Firestore DB listener thread started");
+            log::info!("Firestore DB listener event received");
             match event {
                 FirestoreListenEvent::DocumentChange(ref doc_change) => {
                     if let Some(doc) = &doc_change.document {
@@ -157,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         log::info!("Recevied: {sensor_refresh_request:?} r_ts={}, r_cmd={}", sensor_refresh_request.r_ts, sensor_refresh_request.r_cmd);
                         let delta_ts = (Utc.timestamp_opt(sensor_refresh_request.r_ts as i64, 0).unwrap() - Utc::now()).num_seconds();
                         log::info!("Time delta of refresh request: delta={}s", delta_ts);
-                        if delta_ts < 0 && delta_ts > REFRESH_REQUEST_TIMEWINDOW_SECONDS {
+                        if delta_ts <= 0 && delta_ts > REFRESH_REQUEST_TIMEWINDOW_SECONDS {
                             let command = sensor_refresh_request.r_cmd;
                             match command {
                                 0 => {
@@ -187,23 +188,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         config_env_var("GOOGLE_APPLICATION_CREDENTIALS")?.to_string().into()
                                     ).await?;
                                     log::info!("Firestore DB initialized");
-                                    
-                                    // check user environment variable is set
-                                    let user : String = get_user_from_env();
-                                    let state : State = get_state(&Gpio::new()?.get(GPIO_PIN_18)?.into_input_pullup());
-                                    let s : String = match state {
-                                        State::Open => "OPEN".to_lowercase().to_string(),
-                                        State::Closed => "CLOSED".to_lowercase().to_string(),
-                                    };
 
                                     // Update sensor document with online = true
                                     db.fluent()
                                     .update()
-                                    .in_col("sensors")
-                                    .document_id(user.clone())
+                                    .in_col(SENSORS_COLLECTION)
+                                    .document_id(get_user_from_env().clone())
                                     .object(&SensorObject {
-                                        onine: true,
-                                        state: s
+                                        online: true,
+                                        state: match get_state(&Gpio::new()?.get(GPIO_PIN_18)?.into_input_pullup()) {
+                                            State::Open => "OPEN".to_lowercase().to_string(),
+                                            State::Closed => "CLOSED".to_lowercase().to_string(),
+                                        }
                                     })
                                     .execute()
                                     .await?;
