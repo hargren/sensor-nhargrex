@@ -9,6 +9,7 @@
     <string name="sign_out">Google Sign Out</string>
     <string name="signed_out">Signed Out</string>
     <string name="signed_in">Signed In</string>
+    <string name="online">Online: %s</string>
     <string name="error">Error</string>
     <string name="unknown_msg">Unknown</string>
     <string name="description">This is the description…</string>

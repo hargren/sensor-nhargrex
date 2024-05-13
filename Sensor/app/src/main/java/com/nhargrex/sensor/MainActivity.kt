@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var userId: String
     private lateinit var state: String
     private lateinit var email: String
+    private lateinit var online: String
     private lateinit var updateSubscriber : ListenerRegistration
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,7 +40,7 @@ class MainActivity : ComponentActivity() {
 
         userId = getString(R.string.unknown_msg)
         state = getString(R.string.unknown_msg)
-        email = getString(R.string.unknown_msg)
+        online = false.toString()
 
         setContentView(R.layout.activity_main)
 
@@ -57,6 +58,7 @@ class MainActivity : ComponentActivity() {
             setState(getString(R.string.unknown_msg))
             setUserId(this.userId)
             setEmail(this.email)
+            setOnline(false)
         } else {
             // User is signed in so:
             // show the userId, get and store in firestore the FCM token
@@ -65,10 +67,14 @@ class MainActivity : ComponentActivity() {
             this.userId = getString(R.string.signed_in)
             getIdToken(auth.currentUser)
             updateState()
+            setOnline(false)
+            lifecycleScope.launch {
+                // this is async/suspend operation
+                updateOnline()
+            }
             updateSubscriber = subscribeToStateUpdates()
         }
 
-        //val signIn = setSignInButtonText(auth.currentUser)
         setSignInButtonText(auth.currentUser).setOnClickListener { _: View? ->
             if (auth.currentUser != null) {
                 AuthUI.getInstance()
@@ -77,8 +83,9 @@ class MainActivity : ComponentActivity() {
                         setSignInButtonText(auth.currentUser)
                         setUserId(getString(R.string.signed_out))
                         setEmail(getString(R.string.unknown_msg))
-                        updateSubscriber.remove()
                         setState(getString(R.string.unknown_msg))
+                        setOnline(false)
+                        updateSubscriber.remove()
                     }
             } else {
                 signInLauncher.launch(signInIntent)
@@ -110,6 +117,10 @@ class MainActivity : ComponentActivity() {
             if (auth.currentUser != null) {
                 getIdToken(auth.currentUser)
                 updateState()
+                lifecycleScope.launch {
+                    // this is async/suspend operation
+                    updateOnline()
+                }
                 updateSubscriber = subscribeToStateUpdates()
             }
         } else {
@@ -119,6 +130,7 @@ class MainActivity : ComponentActivity() {
             this.userId = getString(R.string.signed_out)
             setState(getString(R.string.unknown_msg))
             setEmail(getString(R.string.unknown_msg))
+            setOnline(false)
             setUserId(this.userId)
             Log.i(TAG, "Login failed - $response.getError().getErrorCode()")
         }
@@ -135,7 +147,7 @@ class MainActivity : ComponentActivity() {
         val currentUser = FirebaseAuth.getInstance().currentUser
 
         currentUser?.let {
-            val userId = currentUser.uid;
+            val userId = currentUser.uid
             Firebase.firestore
                 .collection("sensors")
                 .document(userId)
@@ -143,6 +155,67 @@ class MainActivity : ComponentActivity() {
                 .addOnSuccessListener { document ->
                     setState((document.data?.get("state") ?: "--").toString())
                 }
+        }
+    }
+
+    private suspend fun updateOnline() {
+
+        val currentUser = FirebaseAuth.getInstance().currentUser
+
+        currentUser?.let {
+            val userId = currentUser.uid
+
+            // get the sensor document
+            val sensorDocument = Firebase.firestore
+                .collection("sensors")
+                .document(userId)
+                .get()
+                .await()
+
+            // set online to false
+            sensorDocument.data?.set("online", false)
+
+            val updatedSensorDocument = hashMapOf(
+                "online" to false,
+                "state" to sensorDocument.data?.get("state")
+            )
+
+            // write the document
+            Firebase.firestore
+                .collection("sensors")
+                .document(userId)
+                .set(updatedSensorDocument)
+                .await()
+
+            // send command to device to request it to update online state as device might be offline
+            val sensorRefreshRequest = hashMapOf(
+                "r_ts" to (System.currentTimeMillis() / 1000),
+                "r_cmd" to 1
+            )
+
+            Log.i(TAG, "Sensor Refresh Request Document - $sensorRefreshRequest")
+
+            Firebase.firestore
+                .collection("sensorsRefreshRequest")
+                .document(userId)
+                .set(sensorRefreshRequest)
+                .await()
+
+            // wait for device to update the online state - if it doesn't we will say it is offline
+            // TODO: make this a listen for change
+            Thread.sleep(5000)
+
+            val sensor = Firebase.firestore
+                .collection("sensors")
+                .document(userId)
+                .get()
+                .await()
+
+            val online = sensor.data?.get("online")
+
+            Log.i(TAG, "Sensor Data Document - online=$online")
+
+            setOnline(online as Boolean?)
         }
     }
 
@@ -196,6 +269,12 @@ class MainActivity : ComponentActivity() {
         this.email = email ?: "--"
         val textView = findViewById<View>(R.id.email) as TextView
         textView.text = getString(R.string.email, this.email)
+    }
+
+    private fun setOnline(online: Boolean?) {
+        this.online = online.toString()
+        val textView = findViewById<View>(R.id.online) as TextView
+        textView.text = getString(R.string.online, this.online)
     }
 
     private fun setState(state: String?) {

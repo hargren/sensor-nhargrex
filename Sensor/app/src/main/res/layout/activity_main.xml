@@ -39,9 +39,17 @@
         android:id="@+id/state"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textSize="40sp"
         android:padding="10dp"
-        android:text="@string/state" />
+        android:text="@string/state"
+        android:textSize="40sp" />
+
+    <TextView
+        android:id="@+id/online"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="10dp"
+        android:text="@string/online"
+        android:textSize="40sp" />
 
     <Button
         android:id="@+id/signIn"
