@@ -52,6 +52,12 @@
         android:textSize="40sp" />
 
     <Button
+        android:id="@+id/refresh"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/refresh" />
+
+    <Button
         android:id="@+id/signIn"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
