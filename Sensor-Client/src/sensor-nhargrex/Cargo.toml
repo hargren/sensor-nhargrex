@@ -16,6 +16,8 @@ simple-logging = "2.0.2"
 simple_logger = "5.0.0"
 tokio = {version = "1.37.0", features = ["rt", "rt-multi-thread", "macros"] }
 unflappable = "0.2.0"
+anyhow = "1.0"
+ctrlc = "3.2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
