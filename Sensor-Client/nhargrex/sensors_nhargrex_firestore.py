@@ -18,9 +18,12 @@ import google.auth.transport.requests
 import firebase_admin
 import re
 import os
+import time
+import pyrebase
 from firebase_admin import firestore
 from google.oauth2 import service_account
 from firebase_admin import firestore
+from picamera2 import Picamera2
 
 PROJECT_ID = 'sensors-nhargrex'
 BASE_URL = 'https://fcm.googleapis.com'
@@ -107,6 +110,11 @@ def _validate_state(state):
     case _:
       raise ValueError('Invalid state: valid states are [open|closed].')    
 
+def _capture_video(filename, capture_time):
+  picam2 = Picamera2()
+  picam2.start_and_record_video(filename, duration=capture_time)
+  picam2.close()
+
 #
 # Send notification entry point
 # -- update_state_and_notify_user(user, state)
@@ -121,6 +129,9 @@ def update_state_and_notify_user(user, state):
     app = firebase_admin.initialize_app()
     state_in_cloud = _firestore_read_state(user)["state"]
     if (state != state_in_cloud):
+      timestr = time.strftime("%Y%m%d-%H%M%S")
+      filename = f"security-{timestr}"
+      _capture_video(filename, capture_time=30)
       _firestore_add_data(state, user)
       _send_fcm_message(_build_message(_firestore_read_data(user)["token"], state))   
     firebase_admin.delete_app(app)
