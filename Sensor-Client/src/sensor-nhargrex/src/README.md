@@ -7,8 +7,8 @@ sensor-nhargrex Rust program
 ```
 export GOOGLE_APPLICATION_CREDENTIALS="/opt/.security/<firebase-security.json>"
 export GOOGLE_USER_ID="<userId>"
-export GOOGLE_PROJECT_ID=sensors-nhargrex
-export export FIREBASE_STORAGE_BUCKET="sensors-nhargrex.appspot.com"
+export GOOGLE_PROJECT_ID=<projectId>
+export export FIREBASE_STORAGE_BUCKET="<projectId>.appspot.com"
 ```
 ## Build
 ```
