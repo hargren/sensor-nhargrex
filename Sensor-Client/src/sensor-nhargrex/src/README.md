@@ -32,7 +32,7 @@ ps -eaf | grep sensor | grep nhargrex |  grep -Pio1 'nhargre1\s+\d+' | sed -r s/
 ## Hardware
 ```
 GND         --> 5
-GPIO PIN 17 --> 6 -- used for interrupt on thread 1 and commands on thread 2
+GPIO PIN 17 --> 6 -- used for door sensor pin
 GPIO PIN 27 --> 7 -- used for DHT22 data pin
 GPIO PIN 28 --> 8 -- used for DHT22 data pin
 ```
