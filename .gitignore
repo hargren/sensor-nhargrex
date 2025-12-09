@@ -45,3 +45,11 @@ nhargrex.egg-info/
 
 # raspberrypi
 nhargre1@raspberrypi/
+
+# video files
+videos/
+*.mp4
+
+# security files
+*security-*
+

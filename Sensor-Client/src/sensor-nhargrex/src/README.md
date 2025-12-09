@@ -15,17 +15,15 @@ export export FIREBASE_STORAGE_BUCKET="sensors-nhargrex.appspot.com"
 sudo rm -f /tmp/sensor-nhargrex.log && cargo build && cargo run
 
 tail -f /tmp/sensor-nhargrex.log
-
-or:
-
-cargo build --release
-
-./target/release/sensor-nhargrex
-
 ```
 ## Install
 ```
-cargo build --release && sudo systemctl daemon-reload && sudo systemctl start sensor-nhargrex && sudo systemctl status sensor-nhargrex
+sudo systemctl stop sensor-nhargrex && \
+sudo rm -f /tmp/sensor-nhargrex.log && \
+cargo build --release && \
+sudo systemctl daemon-reload && \
+sudo systemctl start sensor-nhargrex && \
+sudo systemctl status sensor-nhargrex
 ```
 ## To kill
 ```
