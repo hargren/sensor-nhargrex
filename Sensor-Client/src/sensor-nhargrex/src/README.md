@@ -39,6 +39,6 @@ GPIO PIN 28 --> 8 -- used for DHT22 data pin
 ## GCloud Untilites
 ```
 gcloud init
-gsutil ls gs://sensors-nhargrex.appspot.com/videos/<userId> 
-gsutil cp gs://sensors-nhargrex.appspot.com/videos/<userId>/security-20251130-175019.mp4
+gsutil ls gs://<projectId>.appspot.com/videos/<userId> 
+gsutil cp gs://<projectId>.appspot.com/videos/<userId>/security-20251130-175019.mp4
 ```
