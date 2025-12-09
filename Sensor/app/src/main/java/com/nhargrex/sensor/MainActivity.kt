@@ -5,8 +5,8 @@ import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.widget.Button
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import com.auth0.android.jwt.JWT
@@ -23,7 +23,7 @@ import com.google.firebase.firestore.firestore
 import com.google.firebase.messaging.messaging
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-
+import kotlin.properties.Delegates
 
 class MainActivity : ComponentActivity() {
 
@@ -32,7 +32,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var userId: String
     private lateinit var state: String
     private lateinit var email: String
-    private lateinit var online: String
+    private var online by Delegates.notNull<Boolean>()
     private lateinit var updateSubscriber : ListenerRegistration
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,7 +40,7 @@ class MainActivity : ComponentActivity() {
 
         userId = getString(R.string.unknown_msg)
         state = getString(R.string.unknown_msg)
-        online = false.toString()
+        online = false
 
         setContentView(R.layout.activity_main)
 
@@ -66,13 +66,36 @@ class MainActivity : ComponentActivity() {
             // subscribe to real-time updates of state
             this.userId = getString(R.string.signed_in)
             getIdToken(auth.currentUser)
-            updateState()
+
             setOnline(false)
             lifecycleScope.launch {
                 // this is async/suspend operation
+                // only update the state (from default unknown) if we are online
+                setState(getString(R.string.unknown_msg))
                 updateOnline()
+                if (online) {
+                    updateState()
+                }
             }
             updateSubscriber = subscribeToStateUpdates()
+        }
+
+        val refreshButton: Button = findViewById(R.id.refresh)
+
+        refreshButton.setOnClickListener {
+            if (auth.currentUser != null) {
+                refreshButton.isEnabled = false
+                lifecycleScope.launch {
+                    // this is async/suspend operation
+                    setState(getString(R.string.unknown_msg))
+                    setOnline(false)
+                    updateOnline()
+                    if (online) {
+                        updateState()
+                    }
+                    refreshButton.isEnabled = true
+                }
+            }
         }
 
         setSignInButtonText(auth.currentUser).setOnClickListener { _: View? ->
@@ -116,10 +139,14 @@ class MainActivity : ComponentActivity() {
             setSignInButtonText(auth.currentUser)
             if (auth.currentUser != null) {
                 getIdToken(auth.currentUser)
-                updateState()
+                setState(getString(R.string.unknown_msg))
                 lifecycleScope.launch {
                     // this is async/suspend operation
+                    setState(getString(R.string.unknown_msg))
                     updateOnline()
+                    if (online) {
+                        updateState()
+                    }
                 }
                 updateSubscriber = subscribeToStateUpdates()
             }
@@ -142,12 +169,27 @@ class MainActivity : ComponentActivity() {
         return signIn
     }
 
-    private fun updateState() {
+    private suspend fun updateState() {
 
         val currentUser = FirebaseAuth.getInstance().currentUser
 
         currentUser?.let {
             val userId = currentUser.uid
+
+            // send command to device to request it to update door state as we are online now
+            Firebase.firestore
+                .collection("sensorsRefreshRequest")
+                .document(userId)
+                .set(hashMapOf(
+                    "r_ts" to (System.currentTimeMillis() / 1000),
+                    "r_cmd" to 0
+                ))
+                .await()
+
+            // wait for device to update the state
+            // TODO: make this a listen for change
+            Thread.sleep(3000)
+
             Firebase.firestore
                 .collection("sensors")
                 .document(userId)
@@ -175,35 +217,29 @@ class MainActivity : ComponentActivity() {
             // set online to false
             sensorDocument.data?.set("online", false)
 
-            val updatedSensorDocument = hashMapOf(
-                "online" to false,
-                "state" to sensorDocument.data?.get("state")
-            )
-
-            // write the document
+            // write the sensor document to set the online state to false
             Firebase.firestore
                 .collection("sensors")
                 .document(userId)
-                .set(updatedSensorDocument)
+                .set(hashMapOf(
+                    "online" to false,
+                    "state" to sensorDocument.data?.get("state")
+                ))
                 .await()
 
-            // send command to device to request it to update online state as device might be offline
-            val sensorRefreshRequest = hashMapOf(
-                "r_ts" to (System.currentTimeMillis() / 1000),
-                "r_cmd" to 1
-            )
-
-            Log.i(TAG, "Sensor Refresh Request Document - $sensorRefreshRequest")
-
+            // send command via document update to request online state
             Firebase.firestore
                 .collection("sensorsRefreshRequest")
                 .document(userId)
-                .set(sensorRefreshRequest)
+                .set(hashMapOf(
+                    "r_ts" to (System.currentTimeMillis() / 1000),
+                    "r_cmd" to 1
+                ))
                 .await()
 
             // wait for device to update the online state - if it doesn't we will say it is offline
             // TODO: make this a listen for change
-            Thread.sleep(5000)
+            Thread.sleep(3000)
 
             val sensor = Firebase.firestore
                 .collection("sensors")
@@ -228,11 +264,17 @@ class MainActivity : ComponentActivity() {
         val unsubscribeToUpdates =
             docRef.addSnapshotListener { querySnapshot, firebaseFirestoreException ->
                 firebaseFirestoreException?.let {
-                    Toast.makeText(this, it.message, Toast.LENGTH_SHORT).show()
                     return@addSnapshotListener
                 }
                 querySnapshot?.let {
-                    setState((querySnapshot.data?.get("state") ?: "--").toString())
+                    if (online) {
+                        Log.i(TAG, "Update to document - online")
+                        setState((querySnapshot.data?.get("state") ?: "--").toString())
+                    }
+                    else {
+                        Log.i(TAG, "Update to document - not online")
+                        setState(getString(R.string.unknown_msg))
+                    }
                 }
             }
         return unsubscribeToUpdates
@@ -249,7 +291,7 @@ class MainActivity : ComponentActivity() {
                 // Get new FCM registration token
                 val token = getAndStoreRegistrationToken()
                 val msg = getString(R.string.msg_token_fmt, token)
-                Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT).show()
+                //Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -272,9 +314,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setOnline(online: Boolean?) {
-        this.online = online.toString()
-        val textView = findViewById<View>(R.id.online) as TextView
-        textView.text = getString(R.string.online, this.online)
+        if (online != null) {
+            this.online = online
+            val textView = findViewById<View>(R.id.online) as TextView
+            textView.text = getString(R.string.online, this.online.toString())
+        }
     }
 
     private fun setState(state: String?) {
@@ -312,5 +356,3 @@ class MainActivity : ComponentActivity() {
         return token
     }
 }
-
-
