@@ -84,6 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let sendor_door_pin_for_startup = sensor_door_pin.clone();
     let worker_sensor_state_pin = sensor_door_pin.clone();
     let worker_sensor_primary_temp_pin = sensor_primary_temp_pin.clone();
+    let init_sensor_primary_temp_pin = sensor_primary_temp_pin.clone();
     let sensor_primary_temp_pin_for_command = sensor_primary_temp_pin.clone();
     let sensor_secondary_temp_pin_for_startup = sensor_secondary_temp_pin.clone();
     let sensor_pin_for_command = sensor_door_pin_for_command.clone();
@@ -127,6 +128,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let startup_user = user.clone();
     let command_user = user.clone();
 
+    // used to hold initial temp/humidity reading moved into worker thread
+    let mut inital_temp_f: f32 = 0.0;
+    let mut inital_humidity: f32 = 0.0;
+
+    // initialize temp sensor and get initial reading
+    const MAX_RETRIES: u8 = 5;
+    const RETRY_DELAY: Duration = Duration::from_secs(5);
+    for attempt in 1..=MAX_RETRIES {
+        match read_dht22(&init_sensor_primary_temp_pin) {
+            Ok(Reading { temperature, humidity }) => {
+                let temp_f = temperature * 9.0 / 5.0 + 32.0;
+                log::info!("Initial DHT22 Reading: Temp: {:.2} °F, Humidity: {:.2} %", temp_f, humidity);
+                inital_temp_f = temp_f;
+                inital_humidity = humidity;
+                break;
+            },
+            Err(_) => {
+                log::warn!("Initial DHT22 reading failed, attempt {}/{}", attempt, MAX_RETRIES);
+            }
+        }
+        sleep(RETRY_DELAY).await;
+        if attempt == MAX_RETRIES {
+            log::error!("Initial DHT22 reading failed after {} attempts, exiting", MAX_RETRIES);
+            panic!("Initial DHT22 reading failed");
+        }
+    }
+
     // create a channel and worker thread to handle potentially blocking work
     let (tx, rx) = std::sync::mpsc::channel::<rppal::gpio::Level>();
 
@@ -134,8 +162,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // read door state and dht22 and send to cloud 
     std::thread::spawn(move || {
         log::info!("GPIO worker thread started");
-        let mut last_good_temp_f: f32 = 0.0;
-        let mut last_good_humidity: f32 = 0.0;
+        let mut last_good_temp_f: f32 = inital_temp_f.clone();
+        let mut last_good_humidity: f32 = inital_humidity.clone();
 
         for level in rx {
             let state: State = if level == rppal::gpio::Level::High {
@@ -433,8 +461,6 @@ pub fn update_state_temp_f_humidity_and_notify_user(user: String, state: State, 
 
     Python::with_gil(|py| {
         let firebase = PyModule::import_bound(py, "sensors_nhargrex_firestore")?;
-        // python getattr =
-        //  test_python_integration
         //  update_state_and_notify_user
         let result: i32 = firebase
             .getattr("update_state_and_notify_user")?
