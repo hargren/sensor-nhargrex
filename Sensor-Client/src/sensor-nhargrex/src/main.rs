@@ -24,6 +24,7 @@ use pyo3::types::PyModule;
 use pyo3::prelude::PyAnyMethods;
 use pyo3::Python;
 use pyo3::PyResult;
+use anyhow::{Result};
 
 #[derive(Debug)]
 pub enum State {
@@ -97,12 +98,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!("Wait to start (for network)");
     thread::sleep(POLLING_DURATION * 6);
     log::info!("Continuing");
-    
-    // setup firestore
-    let db = FirestoreDb::with_options_service_account_key_file(
-        FirestoreDbOptions::new(config_env_var("GOOGLE_PROJECT_ID")?.to_string()),
-        config_env_var("GOOGLE_APPLICATION_CREDENTIALS")?.to_string().into())
-        .await?;
+
+    // initialize firestore
+    let project_id = config_env_var("GOOGLE_PROJECT_ID")?.to_string();
+    let key_file = config_env_var("GOOGLE_APPLICATION_CREDENTIALS")?.to_string().into();
+    let db = init_firestore_with_retry(project_id, key_file, 5)
+        .await
+        .map_err(|e| {
+            log::error!("Firestore initialization failed: {:?}", e);
+            e
+        })?;
+
     log::info!("Firestore DB initialized");
 
     let mut listener = db
@@ -351,7 +357,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let monitor_user = monitor_user.clone();
         async move {
             sleep(Duration::from_secs(10)).await;
-            log::info!("Starting Secondary periodic DHT22 read task (GPIO27)");
+            log::info!("Starting Low Temp Warning Monitor periodic DHT22 read task");
             let mut iv = interval(Duration::from_secs(5)); // every 5 seconds
             loop {
                 iv.tick().await;
@@ -485,6 +491,56 @@ pub fn read_dht22_once(sensor_temp_pin: &Arc<Mutex<IoPin>>) -> Result<Reading, R
         Err(_) => todo!()
     }
 }
+
+/// Initialize Firestore with retries and exponential backoff
+pub async fn init_firestore_with_retry(
+    project_id: String,
+    key_file: String,
+    max_attempts: usize,
+) -> Result<FirestoreDb> {
+    let mut attempt = 0;
+    let mut delay = Duration::from_secs(2);
+
+    loop {
+        attempt += 1;
+        log::info!("Attempt {} to initialize Firestore DB", attempt);
+
+        // Wrap in timeout so we don't hang forever
+        let result = tokio::time::timeout(
+            Duration::from_secs(20),
+            FirestoreDb::with_options_service_account_key_file(
+                FirestoreDbOptions::new(project_id.clone()),
+                key_file.clone().into(),
+            ),
+        )
+        .await;
+
+        match result {
+            Ok(Ok(db)) => {
+                log::info!("Firestore DB initialized successfully on attempt {}", attempt);
+                return Ok(db);
+            }
+            Ok(Err(e)) => {
+                log::warn!("Firestore init failed: {:?}", e);
+            }
+            Err(_) => {
+                log::warn!("Firestore init timed out after 20s");
+            }
+        }
+
+        if attempt >= max_attempts {
+            return Err(anyhow::anyhow!(
+                "Failed to initialize Firestore after {} attempts",
+                attempt
+            ));
+        }
+
+        log::info!("Retrying in {:?}...", delay);
+        sleep(delay).await;
+        delay *= 2; // exponential backoff
+    }
+}
+
 
 pub async fn start_update_sensor_read_and_user_update_and_notitfy(
     startup_user: String,
