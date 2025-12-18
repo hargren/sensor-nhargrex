@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // initialize firestore
     let project_id = config_env_var("GOOGLE_PROJECT_ID")?.to_string();
     let key_file = config_env_var("GOOGLE_APPLICATION_CREDENTIALS")?.to_string().into();
-    let db = init_firestore_with_retry(project_id, key_file, 5)
+    let db = init_firestore_with_retry(project_id, key_file, 10)
         .await
         .map_err(|e| {
             log::error!("Firestore initialization failed: {:?}", e);
@@ -139,8 +139,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut inital_humidity: f32 = 0.0;
 
     // initialize temp sensor and get initial reading
-    const MAX_RETRIES: u8 = 5;
-    const RETRY_DELAY: Duration = Duration::from_secs(5);
+    const MAX_RETRIES: u8 = 10;
+    const INITIAL_DELAY_SECS: u64 = 1;
+
     for attempt in 1..=MAX_RETRIES {
         match read_dht22(&init_sensor_primary_temp_pin) {
             Ok(Reading { temperature, humidity }) => {
@@ -150,14 +151,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 inital_humidity = humidity;
                 break;
             },
-            Err(_) => {
-                log::warn!("Initial DHT22 reading failed, attempt {}/{}", attempt, MAX_RETRIES);
+            Err(e) => {
+                log::warn!("Firestore/DHT sync failed, attempt {}/{}: {:?}", attempt, MAX_RETRIES, e);
+                
+                if attempt == MAX_RETRIES {
+                    log::error!("Failed to initialize after {} attempts", MAX_RETRIES);
+                    panic!("Initialization failed");
+                }
+
+                // Exponential Backoff: 1s, 2s, 4s, 8s, 16s...
+                let backoff_duration = Duration::from_secs(INITIAL_DELAY_SECS * 2u64.pow(attempt as u32 - 1));
+                
+                log::info!("Waiting {:?} before next retry...", backoff_duration);
+                sleep(backoff_duration).await;
             }
-        }
-        sleep(RETRY_DELAY).await;
-        if attempt == MAX_RETRIES {
-            log::error!("Initial DHT22 reading failed after {} attempts, exiting", MAX_RETRIES);
-            panic!("Initial DHT22 reading failed");
         }
     }
 
@@ -277,6 +284,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                                         // get gpio pin as input and read state
                                         let state = read_shared_state(&door_pin);
+                                        log::info!("{} State {:?}", Utc::now().timestamp(), state);
 
                                         // get temp and humidity
                                         let t : f32;
@@ -293,15 +301,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                             }
                                         }
 
-                                        // get gpio pin as input and read state
-                                        //let state = get_state(&Gpio::new()?.get(GPIO_PIN_18)?.into_input_pullup());
-                                        log::info!("{} State {:?}", Utc::now().timestamp(), state);
-
                                         // update (cloud) state and notify (Android) user
                                         // will only notify if state is different to the one in the cloud
                                         if let Err(error) = update_state_temp_f_humidity_and_notify_user(v_user, state, Some(t), Some(h), Some(false)) {
-                                            log::error!("Panic on update_state_temp_f_humidity_and_notify_user {:?}", error);
-                                            panic!("Error: {:?}", error);
+                                            log::error!("Error on update_state_temp_f_humidity_and_notify_user {:?} - continuing", error);
+                                            // continue without this update
                                         }
                                     }
                                     1 => {
@@ -384,7 +388,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                             if let Err(error) = update_state_temp_f_humidity_and_notify_user(monitor_user.clone(), read_shared_state(&sensor_pin_for_temp_monitor), Some(temp_f), Some(humidity), Some(force_notify)) {
                                 log::error!("Panic on update_state_temp_f_humidity_and_notify_user {:?}", error);
-                                panic!("Error: {:?}", error);
+                                //panic!("Error: {:?}", error);
                             }
 
                             // Wait 8 hours before polling again
