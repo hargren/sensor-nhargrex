@@ -4,6 +4,7 @@ setup(
     name="nhargrex",
     version="0.1",
     packages=find_packages(),
+    py_modules=["sensors_nhargrex_firestore"], 
     install_requires=[
         # List any dependencies your package has here
     ],

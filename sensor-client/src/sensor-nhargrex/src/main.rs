@@ -45,7 +45,9 @@ struct SensorRefreshRequestObject {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct SensorObject {
     online: bool,
-    state: String
+    state: String,
+    temp_f: f32,
+    humidity: f32
 }
 
 lazy_static! {
@@ -280,11 +282,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 match command {
                                     0 => {
                                         // cmd => refresh
-                                        log::info!("Refresh state command request");
+                                        log::info!("Command: refresh");
 
                                         // get gpio pin as input and read state
                                         let state = read_shared_state(&door_pin);
-                                        log::info!("{} State {:?}", Utc::now().timestamp(), state);
 
                                         // get temp and humidity
                                         let t : f32;
@@ -301,16 +302,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                             }
                                         }
 
-                                        // update (cloud) state and notify (Android) user
-                                        // will only notify if state is different to the one in the cloud
-                                        if let Err(error) = update_state_temp_f_humidity_and_notify_user(v_user, state, Some(t), Some(h), Some(false)) {
+                                        log::info!("State {:?}, Temp: {:.2}°F, Humidity: {:.2}%", state, t, h);
+
+                                        // (force) update (cloud) state and notify (Android) user
+                                        if let Err(error) = update_state_temp_f_humidity_and_notify_user(v_user, state, Some(t), Some(h), Some(true)) {
                                             log::error!("Error on update_state_temp_f_humidity_and_notify_user {:?} - continuing", error);
                                             // continue without this update
                                         }
                                     }
                                     1 => {
                                         // cmd => status
-                                        log::info!("Refresh online command request");
+                                        log::info!("Command: status");
 
                                         // setup firestore
                                         let db = FirestoreDb::with_options_service_account_key_file(
@@ -318,6 +320,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                             config_env_var("GOOGLE_APPLICATION_CREDENTIALS")?.to_string().into()
                                         ).await?;
                                         log::info!("Firestore DB initialized");
+
+                                        // read temp and humidity
+                                        let t : f32;
+                                        let h : f32;
+
+                                        match read_dht22_once(&temp_pin) {
+                                            Ok(Reading {temperature, humidity}) => {
+                                                t = temperature;
+                                                h = humidity;    
+                                            }
+                                            Err(_) => {
+                                                t = 0.0;
+                                                h = 0.0;                                                  
+                                            }
+                                        }
 
                                         // Update sensor document with online = true
                                         db.fluent()
@@ -329,11 +346,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                             state: match read_shared_state(&door_pin) {
                                                 State::Open => "OPEN".to_lowercase().to_string(),
                                                 State::Closed => "CLOSED".to_lowercase().to_string(),
-                                            }
+                                            },
+                                            temp_f: t,
+                                            humidity: h
                                         })
                                         .execute::<()>()
                                         .await?;
-                                        log::info!("Online state set to true");
+                                        log::info!("Status and temperature updated to current");
                                     }
                                     _ => {
                                         // not recognized
@@ -492,7 +511,10 @@ pub fn read_dht22_once(sensor_temp_pin: &Arc<Mutex<IoPin>>) -> Result<Reading, R
                 humidity: humidity
             });
         }
-        Err(_) => todo!()
+        Err(_) => {
+            log::warn!("DHT22 reading failed");
+            return Result::Err(ReadingError::Timeout);
+        }
     }
 }
 

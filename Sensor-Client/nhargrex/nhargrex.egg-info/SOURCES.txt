@@ -1,7 +1,0 @@
-LICENSE
-README.md
-setup.py
-nhargrex.egg-info/PKG-INFO
-nhargrex.egg-info/SOURCES.txt
-nhargrex.egg-info/dependency_links.txt
-nhargrex.egg-info/top_level.txt

@@ -22,7 +22,6 @@ import json
 import logging
 import os
 import subprocess
-import traceback
 import firebase_admin
 import requests
 import google.auth.transport.requests
