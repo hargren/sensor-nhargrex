@@ -43,3 +43,10 @@ gcloud init
 gsutil ls gs://sensors-nhargrex.appspot.com/videos/2U0LR6A8LER430Tq4tmdfAdl4iu2 
 gsutil cp gs://sensors-nhargrex.appspot.com/videos/2U0LR6A8LER430Tq4tmdfAdl4iu2/security-20251130-175019.mp4 C:\temp\FirebaseVideos\security-20251130-175019.mp4
 ```
+
+## GCloud pub/sub
+
+```
+gcloud pubsub subscriptions create sensors-nhargrex-stream --topic=sensor-data
+gcloud pubsub subscriptions pull sensors-nhargrex-stream --auto-ack --limit=10
+```

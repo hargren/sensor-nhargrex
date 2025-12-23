@@ -414,6 +414,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             log::warn!("Waiting for 8 hours before checking again...");
                             tokio::time::sleep(Duration::from_secs(60 * 60 * 8)).await;
                         }
+
+                        // publish temp and humidity to cloud every hour
+                        if Utc::now().timestamp() % 3600 == 0 {
+                            if let Err(error) = publish_temp_and_humidity(monitor_user.clone(), Some(temp_f), Some(humidity)) {
+                                log::error!("Error on publish_temp_and_humidity {:?}", error);
+                            }
+                        }
                     },
                     Err(ReadingError::Timeout) => {
                         log::debug!("(Secondary) DHT22 timeout (GPIO18)");
@@ -494,6 +501,37 @@ pub fn update_state_temp_f_humidity_and_notify_user(user: String, state: State, 
         let result: i32 = firebase
             .getattr("update_state_and_notify_user")?
             .call1((user, s, t, h, f,))?
+            .extract()?;
+
+        if result > 0 { return Err(PyValueError::new_err("Unexpected error")) };
+        
+        Ok(())
+    })
+}
+
+pub fn publish_temp_and_humidity(user: String, temp_f: Option<f32>, humidity: Option<f32>) -> PyResult<()> {
+
+    let t = match temp_f {
+        Some(t) => t,
+        None => 0.0
+    };
+
+    let h = match humidity {
+        Some(h) => h,
+        None => 0.0
+    };
+
+    if (t == 0.0) || (h == 0.0) {
+        log::warn!("publish_temp_and_humidity called with invalid temp/humidity: t={}, h={}", t, h);
+        return Ok(());
+    }
+
+    Python::with_gil(|py| {
+        let firebase = PyModule::import_bound(py, "sensors_nhargrex_firestore")?;
+        //  update_state_and_notify_user
+        let result: i32 = firebase
+            .getattr("publish_temp_and_humidity")?
+            .call1((user, t, h,))?
             .extract()?;
 
         if result > 0 { return Err(PyValueError::new_err("Unexpected error")) };

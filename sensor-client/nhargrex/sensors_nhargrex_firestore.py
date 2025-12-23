@@ -30,13 +30,13 @@ import firebase_admin
 import re
 import os
 import time
-import pyrebase
 import time
 import pyrebase
 from firebase_admin import firestore
 from firebase_admin import credentials as firebase_credentials
 from firebase_admin import firestore, storage
 from picamera2 import Picamera2
+from google.cloud import pubsub_v1
 
 logging.basicConfig(level=logging.INFO)
 
@@ -45,6 +45,10 @@ BASE_URL = 'https://fcm.googleapis.com'
 FCM_ENDPOINT = 'v1/projects/' + PROJECT_ID + '/messages:send'
 FCM_URL = BASE_URL + '/' + FCM_ENDPOINT
 SCOPES = ['https://www.googleapis.com/auth/firebase.messaging']
+
+PUBSUB_TOPIC_ID = "sensor-data" # Replace with your desired Pub/Sub topic name
+PUBSUB_PUBLISHER = pubsub_v1.PublisherClient()
+PUBSUB_TOPIC_PATH = PUBSUB_PUBLISHER.topic_path(PROJECT_ID, PUBSUB_TOPIC_ID)
 
 def _get_access_token(credentials_file):
 # [START retrieve_access_token]
@@ -310,8 +314,31 @@ def update_temp_and_humidity(user, temp_f, humidity):
     _validate_user(user)
     _validate_temp(temp_f)
     _validate_humidity(humidity)
-    app = _ensure_firebase_app()
+    _ensure_firebase_app()
     _firestore_add_data(_firestore_read_state(user)["state"], user, temp_f, humidity)
+  except ValueError as e:
+    return 1
+  except RuntimeError as e:
+    return 1
+  return 0
+
+def publish_temp_and_humidity(user, temp_f, humidity):
+  logging.info(f"publish_temp_and_humidity called: user={user!r}, temp={temp_f!r}, humidity={humidity!r}")
+  try:
+    _validate_user(user)
+    _validate_temp(temp_f)
+    _validate_humidity(humidity)
+    _ensure_firebase_app()
+    message_data = {
+        "user": user,
+        "temp_f": temp_f,
+        "humidity": humidity,
+        "timestamp": time.time() # Add a timestamp for time-series analysis
+    }
+    data_bytes = json.dumps(message_data).encode("utf-8")
+    future = PUBSUB_PUBLISHER.publish(PUBSUB_TOPIC_PATH, data_bytes)
+    message_id = future.result() # This will block until the message is published
+    logging.info(f"Published message with ID: {message_id} to topic: {PUBSUB_TOPIC_ID}")
   except ValueError as e:
     return 1
   except RuntimeError as e:
