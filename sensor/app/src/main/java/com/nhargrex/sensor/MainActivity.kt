@@ -172,3 +172,195 @@ class MainViewModel(
         }
     }
 }
+
+class MainActivity : ComponentActivity() {
+
+    private val viewModel: MainViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        setContent {
+            SensorApplicationTheme {
+                val ui = viewModel.uiState.collectAsState().value
+
+                MessageCard(
+                    ui = ui,
+                    onRefresh = { viewModel.refreshState() },
+                    onSignIn = { signInLauncher.launch(signInIntent) },
+                    onSignOut = { viewModel.signOut() }
+                )
+            }
+        }
+    }
+
+    private val signInLauncher = registerForActivityResult(
+        FirebaseAuthUIActivityResultContract()
+    ) { _ ->
+        viewModel.loadInitialState()
+    }
+
+    private val providers = arrayListOf(
+        AuthUI.IdpConfig.GoogleBuilder().build()
+    )
+
+    private val signInIntent = AuthUI.getInstance()
+        .createSignInIntentBuilder()
+        .setAvailableProviders(providers)
+        .build()
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MessageCard(
+    ui: MainUiState,
+    onRefresh: () -> Unit,
+    onSignIn: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    var presses by remember { mutableIntStateOf(0) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                colors = topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = MaterialTheme.colorScheme.primary,
+                ),
+                title = {
+                    Text(stringResource(id = R.string.app_name))
+                },
+                actions = {
+                    IconButton(onClick = { /* menu action */ }) {
+                        Icon(
+                            imageVector = Icons.Filled.Menu,
+                            contentDescription = "Menu"
+                        )
+                    }
+                },
+            )
+        },
+        bottomBar = {
+            BottomAppBar(
+                actions = {
+                    FloatingActionButton(
+                        onClick = {
+                            if (ui.isSignedIn) onSignOut() else onSignIn()
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .fillMaxSize()
+                        ) {
+                            Icon(
+                                Icons.Filled.AccountBox,
+                                contentDescription = "Sign in/out"
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (ui.isSignedIn)
+                                    stringResource(id = R.string.sign_out)
+                                else
+                                    stringResource(id = R.string.sign_in)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    FloatingActionButton(
+                        onClick = onRefresh,
+                        enabled = !ui.loading
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .fillMaxSize()
+                        ) {
+                            Icon(
+                                Icons.Filled.Refresh,
+                                contentDescription = "Refresh"
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (ui.loading)
+                                    "Refreshing..."
+                                else
+                                    stringResource(id = R.string.refresh)
+                            )
+                        }
+                    }
+                },
+                floatingActionButton = {
+                    FloatingActionButton(
+                        onClick = { presses++ },
+                        containerColor = BottomAppBarDefaults.bottomAppBarFabColor,
+                        elevation = FloatingActionButtonDefaults.bottomAppBarFabElevation()
+                    ) {
+                        Icon(Icons.Filled.Add, "Add")
+                    }
+                }
+            )
+        },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier.padding(innerPadding),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                modifier = Modifier.padding(8.dp),
+                text = """
+                    This is your sensor dashboard.
+                    
+                    You have pressed the floating action button $presses times.
+                """.trimIndent(),
+            )
+
+            InfoRow(
+                icon = Icons.Default.Build,
+                label = stringResource(id = R.string.version),
+                value = ui.version
+            )
+
+            InfoRow(
+                icon = Icons.Default.Email,
+                label = stringResource(id = R.string.email),
+                value = ui.email
+            )
+
+            InfoRow(
+                icon = Icons.Default.Person,
+                label = stringResource(id = R.string.user),
+                value = ui.userId
+            )
+
+            InfoRow(
+                icon = Icons.Default.Info,
+                label = "State",
+                value = ui.state
+            )
+
+            InfoRow(
+                icon = Icons.Default.Cloud,
+                label = "Online",
+                value = if (ui.online) "Online" else "Offline"
+            )
+        }
+    }
+}
+
+@Composable
+fun InfoRow(icon: ImageVector, label: String, value: String) {
+    Row(modifier = Modifier.padding(8.dp)) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge
+        )
+    }
+}
