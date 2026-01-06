@@ -47,6 +47,7 @@ gsutil cp gs://sensors-nhargrex.appspot.com/videos/2U0LR6A8LER430Tq4tmdfAdl4iu2/
 ## GCloud pub/sub
 
 ```
+gcloud init
 gcloud pubsub subscriptions create sensors-nhargrex-stream --topic=sensor-data
 gcloud pubsub subscriptions pull sensors-nhargrex-stream --auto-ack --limit=10
 ```

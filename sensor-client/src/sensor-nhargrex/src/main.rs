@@ -10,7 +10,7 @@ use log::LevelFilter;
 use simple_logging::{log_to_file};
 use firestore::*;
 use serde::{Deserialize, Serialize};
-use tokio::time::{sleep, Duration, interval};
+use tokio::time::{sleep, interval, Instant, Duration};
 use lazy_static::lazy_static;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -65,7 +65,8 @@ const SENSORS_REFRESH_REQUEST_COLLECTION: &str = "sensorsRefreshRequest";
 const SENSORS_COLLECTION: &str = "sensors";
 const SENSORS_REFRESH_REQUEST_DOCUMENT_ID: FirestoreListenerTarget = FirestoreListenerTarget::new(17_u32);
 const REFRESH_REQUEST_TIMEWINDOW_SECONDS : i64 = -15;
-const DHT22_TEMP_WARNING_F : f32 = 58.0;
+const DHT22_TEMP_WARNING_F : f32 = 36.0;
+const UPDATE_TEMP_HUMIDITY_FREQUENCY_SECONDS: u64 = 1 * 60; // 1 minute
 
 // Main
 #[tokio::main]
@@ -325,7 +326,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                         let t : f32;
                                         let h : f32;
 
-                                        match read_dht22_once(&temp_pin) {
+                                        match read_dht22_with_retry(&temp_pin).await {
                                             Ok(Reading {temperature, humidity}) => {
                                                 t = temperature;
                                                 h = humidity;    
@@ -336,7 +337,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                             }
                                         }
 
-                                        // Update sensor document with online = true
+                                        // Update sensor document with current status
                                         db.fluent()
                                         .update()
                                         .in_col(SENSORS_COLLECTION)
@@ -375,62 +376,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // secondary dht22 reading (using rust lib)
     // poll and alert on low temp
+
     tokio::spawn({
         let sensor_secondary_temp_pin = Arc::clone(&sensor_secondary_temp_pin);
         let monitor_user = monitor_user.clone();
+        
         async move {
-            sleep(Duration::from_secs(10)).await;
+            // Initial delay to let system settle
+            tokio::time::sleep(Duration::from_secs(10)).await;
             log::info!("Starting Low Temp Warning Monitor periodic DHT22 read task");
-            let mut iv = interval(Duration::from_secs(5)); // every 5 seconds
+            
+            let mut iv = interval(Duration::from_secs(10)); 
+            
+            // Trackers for our two different schedules
+            let mut last_publish_time: Option<Instant> = None;
+            let mut last_warning_time: Option<Instant> = None;
+
+            let publish_interval = Duration::from_secs(UPDATE_TEMP_HUMIDITY_FREQUENCY_SECONDS);
+            let warning_cooldown = Duration::from_secs(8 * 60 * 60); // 8 hours
+
             loop {
                 iv.tick().await;
-                match read_dht22(&sensor_secondary_temp_pin) {
+                
+                match read_dht22_with_retry(&sensor_secondary_temp_pin).await {
                     Ok(Reading {temperature, humidity}) => {
-                        let temp_f = temperature * 9.0 / 5.0 + 32.0;
-                        log::debug!("(Secondary) DHT22 Reading: Temp: {:.2} °F, Humidity: {:.2} %", temp_f, humidity);
-
-                        // Quick sanity check before calling the Python updater
-                        if !( (-40.0..=125.0).contains(&temp_f) && (0.0..=100.0).contains(&humidity) ) {
-                            log::warn!("(Secondary) DHT22 reading out of range, skipping update: {:.2}°F, {:.2}%", temp_f, humidity);
+                        // 1. Sanity Checks
+                        let temp_f = temperature; // temperature is already in °F from read_dht22_with_retry
+                        if !( (-40.0..=125.0).contains(&temp_f) && (0.0..=100.0).contains(&humidity) ) || (temp_f == 32.0 && humidity == 0.0) {
+                            log::warn!("DHT22 reading out of range or invalid, skipping this tick: {:.2}°F, {:.2}%", temp_f, humidity);
                             continue;
                         }
 
-                        if (temp_f == 32.0) && (humidity == 0.0) {
-                            log::warn!("(Secondary) DHT22 reading invalid (32.0°F, 0.0%), skipping update");
-                            continue;
-                        }   
-
-                        // now check to see if temp_f is below warning temp
+                        // 2. Warning Logic (Non-blocking)
                         if temp_f < DHT22_TEMP_WARNING_F && temperature != 0.0 {
-                            let force_notify = true;
-                            log::warn!("(Secondary) DHT22 temperature below warning temp {:.2}: {:.2} °F", DHT22_TEMP_WARNING_F, temp_f);
+                            let can_warn = match last_warning_time {
+                                None => true,
+                                Some(last) => last.elapsed() >= warning_cooldown,
+                            };
 
-                            if let Err(error) = update_state_temp_f_humidity_and_notify_user(monitor_user.clone(), read_shared_state(&sensor_pin_for_temp_monitor), Some(temp_f), Some(humidity), Some(force_notify)) {
-                                log::error!("Panic on update_state_temp_f_humidity_and_notify_user {:?}", error);
-                                //panic!("Error: {:?}", error);
+                            if can_warn {
+                                log::warn!("(Secondary) Temp below warning level: {:.2} °F", temp_f);
+                                if let Err(e) = update_state_temp_f_humidity_and_notify_user(
+                                    monitor_user.clone(), 
+                                    read_shared_state(&sensor_pin_for_temp_monitor), 
+                                    Some(temp_f), Some(humidity), Some(true)
+                                ) {
+                                    log::error!("Warning notification failed: {:?}", e);
+                                } else {
+                                    // Only set the cooldown if notification actually succeeded
+                                    last_warning_time = Some(Instant::now());
+                                    log::info!("Warning sent. Cooldown active for 8 hours.");
+                                }
                             }
-
-                            // Wait 8 hours before polling again
-                            log::warn!("Waiting for 8 hours before checking again...");
-                            tokio::time::sleep(Duration::from_secs(60 * 60 * 8)).await;
                         }
 
-                        // publish temp and humidity to cloud every hour
-                        if Utc::now().timestamp() % 3600 == 0 {
-                            if let Err(error) = publish_temp_and_humidity(monitor_user.clone(), Some(temp_f), Some(humidity)) {
-                                log::error!("Error on publish_temp_and_humidity {:?}", error);
+                        // 3. Periodic Cloud Update (Robust)
+                        let should_publish = match last_publish_time {
+                            None => true,
+                            Some(last) => last.elapsed() >= publish_interval,
+                        };
+
+                        if should_publish {
+                            if let Err(error) = update_temp_and_humidity(monitor_user.clone(), Some(temp_f), Some(humidity)) {
+                                log::error!("Cloud update failed: {:?}", error);
+                                // We don't update last_publish_time here, so it tries again next time
+                            } else {
+                                last_publish_time = Some(Instant::now());
+                                log::info!("Cloud update success: {}°F, {}%", temp_f, humidity);
                             }
                         }
                     },
-                    Err(ReadingError::Timeout) => {
-                        log::debug!("(Secondary) DHT22 timeout (GPIO18)");
-                    },
-                    Err(ReadingError::Checksum) => {
-                        log::debug!("(Secondary) DHT22 checksum error(GPIO18)");
-                    },
-                    Err(ReadingError::Gpio(_)) => {
-                        log::debug!("(Secondary) DHT22 GPIO error (GPIO18)");
-                    }
+                    Err(_e) => log::debug!("Sensor read error"),
                 }
             }
         }
@@ -540,6 +556,62 @@ pub fn publish_temp_and_humidity(user: String, temp_f: Option<f32>, humidity: Op
     })
 }
 
+pub fn update_temp_and_humidity(user: String, temp_f: Option<f32>, humidity: Option<f32>) -> PyResult<()> {
+
+    let t = match temp_f {
+        Some(t) => t,
+        None => 0.0
+    };
+
+    let h = match humidity {
+        Some(h) => h,
+        None => 0.0
+    };
+
+    if (t == 0.0) || (h == 0.0) {
+        log::warn!("update_temp_and_humidity called with invalid temp/humidity: t={}, h={}", t, h);
+        return Ok(());
+    }
+
+    Python::with_gil(|py| {
+        let firebase = PyModule::import_bound(py, "sensors_nhargrex_firestore")?;
+        //  update_state_and_notify_user
+        let result: i32 = firebase
+            .getattr("update_temp_and_humidity")?
+            .call1((user, t, h,))?
+            .extract()?;
+
+        if result > 0 { return Err(PyValueError::new_err("Unexpected error")) };
+        
+        Ok(())
+    })
+}
+
+pub async fn read_dht22_with_retry(sensor_temp_pin: &Arc<Mutex<IoPin>>) -> Result<Reading, ReadingError> {
+    const MAX_RETRIES: u8 = 5;
+    const RETRY_DELAY: Duration = Duration::from_secs(5);
+    for attempt in 1..=MAX_RETRIES {
+        match read_dht22(sensor_temp_pin) {
+            Ok(Reading { temperature, humidity }) => {
+                let temp_f = temperature * 9.0 / 5.0 + 32.0;
+                return Result::Ok(Reading {
+                    temperature: temp_f,
+                    humidity: humidity
+                });
+            }
+            Err(_) => {
+                // pass
+            }
+        }
+
+        // Wait before retrying unless it's the last attempt
+        if attempt < MAX_RETRIES {
+            sleep(RETRY_DELAY).await;
+        }
+    }
+    return Result::Err(ReadingError::Timeout);
+}
+
 pub fn read_dht22_once(sensor_temp_pin: &Arc<Mutex<IoPin>>) -> Result<Reading, ReadingError> {
     match read_dht22(sensor_temp_pin) {
         Ok(Reading { temperature, humidity }) => {
@@ -646,10 +718,9 @@ pub async fn start_update_sensor_read_and_user_update_and_notitfy(
                         Some(false)
                     ) {
                         log::error!(
-                            "Panic on update_state_temp_f_humidity_and_notify_user {:?}",
+                            "Error on update_state_temp_f_humidity_and_notify_user {:?}",
                             error
                         );
-                        panic!("Error: {:?}", error);
                     }
                 }
                 break;

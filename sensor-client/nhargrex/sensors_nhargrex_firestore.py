@@ -145,6 +145,7 @@ def _firestore_add_data(state, user, temp_f=None, humidity=None):
           "online" : True,
           "temp_f": temp_f,
           "humidity": humidity,
+          "timestamp": time.time()
       })
     else:
       doc_ref.set({
@@ -197,6 +198,11 @@ def _validate_humidity(humidity):
   if (type(humidity) is not float or humidity < 0.0 or humidity > 100.0):
     logging.info(f"_validate_humidity: invalid humidity value: {humidity!r}")
     raise ValueError('Invalid humidity: valid range is 0 to 100%.]') 
+  
+def _validate_timestamp(timestamp):
+  if (type(timestamp) is not int or timestamp < 0 ):
+    logging.info(f"_validate_timestamp: invalid timestamp: {timestamp!r}")
+    raise ValueError('Invalid timestamp: valid range is 0 and up.') 
 
 def _capture_video(filename_base, capture_time):
     """
@@ -308,8 +314,6 @@ def update_state_and_notify_user(user, state, temp_f=None, humidity=None, force_
         raise
 
 def update_temp_and_humidity(user, temp_f, humidity):
-  logging.info(f"update_temp_and_humidity called: user={user!r}, temp={temp_f!r}, humidity={humidity!r}")
-  logging.info(f"ENV GOOGLE_APPLICATION_CREDENTIALS={os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')!r}, GOOGLE_USER_ID={os.environ.get('GOOGLE_USER_ID')!r}")
   try:
     _validate_user(user)
     _validate_temp(temp_f)
