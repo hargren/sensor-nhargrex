@@ -47,7 +47,8 @@ struct SensorObject {
     online: bool,
     state: String,
     temp_f: f32,
-    humidity: f32
+    humidity: f32,
+    timestamp: f64
 }
 
 lazy_static! {
@@ -326,6 +327,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                         let t : f32;
                                         let h : f32;
 
+                                        // Get the duration since Unix Epoch
+                                        let now = SystemTime::now().duration_since(UNIX_EPOCH)
+                                            .expect("Time went backwards"); // Handle clock drift safely
+
+                                        // Use f64 to match Python's double-precision float
+                                        let timestamp: f64 = now.as_secs_f64();
+
                                         match read_dht22_with_retry(&temp_pin).await {
                                             Ok(Reading {temperature, humidity}) => {
                                                 t = temperature;
@@ -336,6 +344,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                 h = 0.0;                                                  
                                             }
                                         }
+
+                                        log::info!("Temp: {:.2}°F, Humidity: {:.2}%, Timestamp: {}", t, h, timestamp);
 
                                         // Update sensor document with current status
                                         db.fluent()
@@ -349,7 +359,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                 State::Closed => "CLOSED".to_lowercase().to_string(),
                                             },
                                             temp_f: t,
-                                            humidity: h
+                                            humidity: h,
+                                            timestamp: timestamp
                                         })
                                         .execute::<()>()
                                         .await?;
