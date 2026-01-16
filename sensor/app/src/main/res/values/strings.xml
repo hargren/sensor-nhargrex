@@ -1,16 +1,16 @@
 <resources>
     <string name="app_name">Sensor</string>
-    <string name="version">Version: %s</string>
-    <string name="user">User: %s</string>
-    <string name="state">State: %s</string>
-    <string name="email">Email: %s</string>
+    <string name="version">Version</string>
+    <string name="user">User</string>
+    <string name="state">State</string>
+    <string name="email">Email</string>
     <string name="title">Title</string>
     <string name="sign_in">Google Sign In</string>
     <string name="sign_out">Google Sign Out</string>
     <string name="signed_out">Signed Out</string>
     <string name="signed_in">Signed In</string>
     <string name="refresh">Refresh</string>
-    <string name="online">Online: %s</string>
+    <string name="online">Online</string>
     <string name="error">Error</string>
     <string name="unknown_msg">unknown</string>
     <string name="description">This is the description…</string>

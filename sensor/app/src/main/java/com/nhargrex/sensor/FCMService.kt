@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.Context
 import android.content.Intent
 import android.util.Log
 import android.widget.RemoteViews
@@ -17,11 +16,26 @@ const val channelId = "notification_channel"
 const val channelName = "com.nhargrex.sensor"
 
 @SuppressLint("MissingFirebaseInstanceTokenRefresh")
-class FCMService : FirebaseMessagingService  () {
+class FCMService : FirebaseMessagingService() {
 
+    override fun onMessageReceived(message: RemoteMessage) {
+        // Kotlin 2.1.0 might crash if you use RemoteMessage? (nullable)
+        // or if there's a syntax error on line 21
+        super.onMessageReceived(message)
+    }
+
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+    }
+}
+/*
+class FCMService : FirebaseMessagingService() {
+
+    // Ensure this signature is exactly as follows:
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
-        if(remoteMessage.getNotification() != null) {
-            generateNotification(remoteMessage.notification!!.title!!, remoteMessage.notification!!.body!!)
+        // Use safe calls or let to handle the potential nulls inside the message
+        remoteMessage.notification?.let { notification ->
+            generateNotification(notification.title ?: "", notification.body ?: "")
         }
     }
 
@@ -50,10 +64,11 @@ class FCMService : FirebaseMessagingService  () {
 
         builder = builder.setContent(getRemoteView(title, message))
 
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
         notificationManager.createNotificationChannel(NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_HIGH))
 
         notificationManager.notify(0, builder.build())
     }
 }
+*/
