@@ -136,8 +136,17 @@ class MainRepository {
             false
         }
     }
-    suspend fun requestStateRefresh(userId: String) {
+    suspend fun markOfflineAndRequestRefresh(userId: String) {
+        // 1. Force the sensor document to offline status locally in Firestore
+        firestore.collection("sensors")
+            .document(userId)
+            .update("online", false)
+            .await()
 
+        // 2. Send the command to the hardware
+        requestStateRefresh(userId)
+    }
+    suspend fun requestStateRefresh(userId: String) {
         // This will tell the device to update the Firebase document
         // with the current state; update of the document will then
         // trigger the listener `observeState` which will update the UI
@@ -277,35 +286,27 @@ class MainViewModel(
     fun refreshState() {
         viewModelScope.launch {
 
-            _uiState.update { it.copy(
-                isLoading= true
-            ) }
-
             val userId = repo.currentUser()?.uid ?: return@launch
+            _uiState.update { it.copy(isLoading = true) }
 
-            val online = repo.refreshOnline(userId)
+            try {
+                // 1. Mark offline and send request to device for state
+                repo.markOfflineAndRequestRefresh(userId)
 
-            _uiState.update { it.copy(online = online) }
+                // 2. Wait for a few seconds to give the hardware time to respond.
+                // During this time, your 'observeState' listener is already
+                // watching for the document to turn 'online = true which will then update the UI
+                kotlinx.coroutines.delay(3000)
 
-            // In MainViewModel inside refreshState()
-            if (online) {
-                repo.requestStateRefresh(userId)
-                val d = repo.getDocument(userId)
+                val finalDoc = repo.getDocument(userId)
+                _uiState.update { it.copy(
+                    online = finalDoc.online,
+                    isLoading = false
+                ) }
 
-                // Only update the Firestore data here.
-                // The Room stats (count, min, max) will update
-                // automatically via the collectors above.
-                _uiState.update {
-                    it.copy(
-                        online = d.online,
-                        state = d.state,
-                        temp = d.temp,
-                        humidity = d.humidity,
-                        timestamp = d.timestamp
-                    )
-                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false) }
             }
-            _uiState.update { it.copy(isLoading = false) }
         }
     }
 
