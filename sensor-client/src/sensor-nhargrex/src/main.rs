@@ -17,6 +17,7 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use std::thread;
+use std::process::Command;
 use chrono::{Utc, TimeZone};
 use rppal::gpio::{Gpio, Trigger, InputPin, Mode, IoPin};
 use pyo3::exceptions::PyValueError;
@@ -365,7 +366,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                         .execute::<()>()
                                         .await?;
                                         log::info!("Status and temperature updated to current");
-                                    }
+                                    },
+                                    3 => {
+                                        // cmd => status
+                                        log::info!("Command: reboot");
+
+                                        match reboot() {
+                                            Ok(()) => {
+                                                log::info!("Reboot requested - OK");    
+                                            }
+                                            Err(_) => {
+                                                log::info!("Reboot requested - Failed");
+                                            }
+                                        }
+                                    } 
                                     _ => {
                                         // not recognized
                                         log::info!("Unknown command recevied!");
@@ -483,6 +497,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 pub fn config_env_var(name: &str) -> Result<String, String> {
     std::env::var(name).map_err(|e| format!("{}: {}", name, e))
+}
+
+pub fn reboot() -> std::io::Result<()> {
+    Command::new("systemctl")
+        .arg("reboot")
+        .status()?;
+    Ok(())
 }
 
 // helper to read shared pin state for door open/closed sensor
